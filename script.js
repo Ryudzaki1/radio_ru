@@ -386,22 +386,11 @@ function renderMusicProgress() {
   const music = latestStreamState.currentMusic || null;
   const isVoiceMode = mode === "voice" || mode === "voice_prelude" || mode === "voice_ducking";
 
-  if (isVoiceMode) {
-    musicProgress.classList.add("is-voice");
-    musicProgress.classList.remove("is-empty");
-    if (progressKind) progressKind.textContent = "Диктор";
-    if (progressTitle) progressTitle.textContent = "Голос в эфире, тайминг скрыт";
-    if (progressFill) progressFill.style.width = "0%";
-    if (progressElapsed) progressElapsed.textContent = "—";
-    if (progressRemaining) progressRemaining.textContent = "—";
-    return;
-  }
-
   if (!music || !music.durationSeconds) {
     musicProgress.classList.add("is-empty");
-    musicProgress.classList.remove("is-voice");
-    if (progressKind) progressKind.textContent = "Музыка";
-    if (progressTitle) progressTitle.textContent = "Ожидаем данные трека";
+    musicProgress.classList.toggle("is-voice", isVoiceMode);
+    if (progressKind) progressKind.textContent = isVoiceMode ? "Диктор" : "Музыка";
+    if (progressTitle) progressTitle.textContent = isVoiceMode ? "Live-подложка готовится" : "Ожидаем данные трека";
     if (progressFill) progressFill.style.width = "0%";
     if (progressElapsed) progressElapsed.textContent = "0:00";
     if (progressRemaining) progressRemaining.textContent = "-0:00";
@@ -412,9 +401,10 @@ function renderMusicProgress() {
   const duration = Math.max(0, Number(music.durationSeconds) || 0);
   const position = Math.min(duration, Math.max(0, (Number(music.positionSeconds) || 0) + elapsedSinceState));
   const progress = duration > 0 ? Math.min(1, position / duration) : 0;
-  const kind = music.kind === "play" ? "Play-вставка" : "Live-трек";
+  const kind = music.kind === "play" ? "Play-вставка" : isVoiceMode ? "Live под диктором" : "Live-трек";
 
-  musicProgress.classList.remove("is-empty", "is-voice");
+  musicProgress.classList.remove("is-empty");
+  musicProgress.classList.toggle("is-voice", isVoiceMode);
   if (progressKind) progressKind.textContent = kind;
   if (progressTitle) progressTitle.textContent = music.title || "Музыка";
   if (progressFill) progressFill.style.width = `${Math.round(progress * 1000) / 10}%`;

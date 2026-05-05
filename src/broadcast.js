@@ -6,6 +6,9 @@ const { listTracks, resolveInside } = require("./music");
 const { writeSystemLog } = require("./systemLog");
 
 const AUDIO_EXTENSIONS = new Set([".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"]);
+const VOICE_DELAY_MIN_MS = 20_000;
+const VOICE_DELAY_MAX_MS = 25_000;
+const VOICE_BRIDGE_MIN_SECONDS = 3;
 
 class BroadcastStream {
   constructor(config) {
@@ -29,6 +32,7 @@ class BroadcastStream {
     this.currentTrackOffset = 0;
     this.audioBitrate = "192k";
     this.nextVoiceAllowedAt = 0;
+    this.voiceReadyInterruptTimer = null;
     this.lastMusicEnqueueError = "";
     this.durationCache = new Map();
     this.lastStatus = {
@@ -75,7 +79,7 @@ class BroadcastStream {
     this.queue.push({
       payload,
       voicePath,
-      delayAfterMs: Number.isFinite(options.delayAfterMs) ? options.delayAfterMs : randomBetween(30_000, 60_000),
+      delayAfterMs: Number.isFinite(options.delayAfterMs) ? options.delayAfterMs : randomBetween(VOICE_DELAY_MIN_MS, VOICE_DELAY_MAX_MS),
       onStart: typeof options.onStart === "function" ? options.onStart : null,
       onEnd: typeof options.onEnd === "function" ? options.onEnd : null,
       onError: typeof options.onError === "function" ? options.onError : null,
@@ -91,7 +95,7 @@ class BroadcastStream {
     });
     if (this.currentPlayItem && this.activeMusicProcess) {
       this.interruptMusicAfterCurrent = true;
-    } else if (this.activeLiveProcess && this.clients.size > 0) {
+    } else if (this.activeLiveProcess && this.clients.size > 0 && Date.now() >= this.nextVoiceAllowedAt) {
       this.liveInterruptedForMusic = true;
       this.activeLiveProcess.kill("SIGTERM");
     }
@@ -100,6 +104,7 @@ class BroadcastStream {
       title: this.lastStatus.title,
       queueLength: this.queue.length,
     });
+    this.scheduleVoiceReadyInterrupt();
     this.start();
     return true;
   }
@@ -144,15 +149,55 @@ class BroadcastStream {
     if (!this.activeLiveProcess || this.clients.size <= 0) return;
     const voiceReady = this.queue.length > 0 && Date.now() >= this.nextVoiceAllowedAt;
     const musicReady = this.musicQueue.length > 0;
-    if (!voiceReady && !musicReady) return;
+    if (!voiceReady && !musicReady) {
+      this.scheduleVoiceReadyInterrupt();
+      return;
+    }
     this.liveInterruptedForMusic = true;
     this.activeLiveProcess.kill("SIGTERM");
+  }
+
+  scheduleVoiceReadyInterrupt() {
+    this.clearVoiceReadyInterrupt();
+    if (!this.queue.length || this.clients.size <= 0 || this.currentPlayItem || this.activeMusicProcess) return;
+
+    const delayMs = Math.max(0, this.nextVoiceAllowedAt - Date.now());
+    this.voiceReadyInterruptTimer = setTimeout(() => {
+      this.voiceReadyInterruptTimer = null;
+      if (!this.queue.length || this.clients.size <= 0 || this.currentPlayItem || this.activeMusicProcess) return;
+      if (Date.now() < this.nextVoiceAllowedAt) {
+        this.scheduleVoiceReadyInterrupt();
+        return;
+      }
+      if (this.activeLiveProcess) {
+        this.liveInterruptedForMusic = true;
+        this.log("live_interrupted_for_voice", {
+          queueLength: this.queue.length,
+          waitedMs: Math.max(0, Date.now() - this.nextVoiceAllowedAt),
+        });
+        this.activeLiveProcess.kill("SIGTERM");
+      } else {
+        this.start();
+      }
+    }, delayMs);
+  }
+
+  clearVoiceReadyInterrupt() {
+    if (!this.voiceReadyInterruptTimer) return;
+    clearTimeout(this.voiceReadyInterruptTimer);
+    this.voiceReadyInterruptTimer = null;
+  }
+
+  voicePreludeSecondsUntilReady() {
+    const delaySeconds = Math.max(0, (this.nextVoiceAllowedAt - Date.now()) / 1000);
+    return Math.max(VOICE_BRIDGE_MIN_SECONDS, delaySeconds);
   }
 
   clearQueue() {
     const cleared = this.queue.length;
     this.queue = [];
     this.nextVoiceAllowedAt = 0;
+    this.clearVoiceReadyInterrupt();
     this.log("voice_queue_cleared", { cleared });
     this.updateStatus({
       mode: this.lastStatus.mode,
@@ -171,7 +216,7 @@ class BroadcastStream {
       musicQueue: this.getPublicMusicQueue(),
       currentPlay: this.currentPlayItem ? this.toPublicMusicItem(this.currentPlayItem) : null,
       currentMusic: this.getPublicCurrentMusic(),
-      nextVoiceInMs: Math.max(0, this.nextVoiceAllowedAt - Date.now()),
+      nextVoiceInMs: this.queue.length > 0 ? Math.max(0, this.nextVoiceAllowedAt - Date.now()) : 0,
     };
   }
 
@@ -221,18 +266,20 @@ class BroadcastStream {
         this.updateStatus({ mode: "voice_waiting_listener", title: "Voice queued, waiting for listener", queueLength: this.queue.length });
       }
 
+      if (this.musicQueue.length > 0 && this.clients.size > 0) {
+        await this.streamMusicQueue(tracks);
+        this.updateStatus({ mode: "music", title: "Music playlist", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength(), musicQueue: this.getPublicMusicQueue(), currentPlay: null });
+        continue;
+      }
+
       if (canPlayVoice) {
+        this.clearVoiceReadyInterrupt();
         const nextVoice = this.queue.shift();
         this.voiceBridgeAfterMusicInterrupt = false;
         await this.streamVoiceSegment(tracks, nextVoice, this.resolveVoiceTiming(nextVoice, 3, 3));
         this.nextVoiceAllowedAt = Date.now() + nextVoice.delayAfterMs;
         this.updateStatus({ mode: "music_between_voice", title: "Music between voice items", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength() });
-        continue;
-      }
-
-      if (this.musicQueue.length > 0 && this.clients.size > 0) {
-        await this.streamMusicQueue(tracks);
-        this.updateStatus({ mode: "music", title: "Music playlist", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength(), musicQueue: this.getPublicMusicQueue(), currentPlay: null });
+        this.scheduleVoiceReadyInterrupt();
         continue;
       }
 
@@ -401,7 +448,7 @@ class BroadcastStream {
         await this.streamSingleMusic(current.musicPath, playStart, middleDuration, current.title);
       }
 
-      const shouldBridgeVoice = this.queue.length > 0 && this.clients.size > 0 && Date.now() >= this.nextVoiceAllowedAt;
+      const shouldBridgeVoice = this.queue.length > 0 && this.clients.size > 0;
       if (shouldBridgeVoice) {
         live = await this.getLiveState(tracks, live.index, live.offset);
         fadeSeconds = this.pickFadeSeconds(currentDuration, live.duration - live.offset);
@@ -412,7 +459,8 @@ class BroadcastStream {
         this.currentTrackOffset = live.offset;
 
         const nextVoice = this.queue.shift();
-        await this.streamVoiceSegment(tracks, nextVoice, this.resolveVoiceTiming(nextVoice, 3, 3));
+        this.clearVoiceReadyInterrupt();
+        await this.streamVoiceSegment(tracks, nextVoice, this.resolveVoiceTiming(nextVoice, this.voicePreludeSecondsUntilReady(), 3));
         this.nextVoiceAllowedAt = Date.now() + nextVoice.delayAfterMs;
         this.updateStatus({
           mode: "music_between_voice",
@@ -422,6 +470,7 @@ class BroadcastStream {
           musicQueue: this.getPublicMusicQueue(),
           currentPlay: null,
         });
+        this.scheduleVoiceReadyInterrupt();
 
         tracks = await this.readTracks();
         if (!tracks.length) break;
@@ -447,12 +496,13 @@ class BroadcastStream {
         if (this.queue.length > 0) {
           this.voiceBridgeAfterMusicInterrupt = true;
         }
-        const shouldPlayTrailingVoice = this.queue.length > 0 && this.clients.size > 0 && Date.now() >= this.nextVoiceAllowedAt;
+        const shouldPlayTrailingVoice = this.queue.length > 0 && this.clients.size > 0;
         if (shouldPlayTrailingVoice) {
           this.voiceBridgeAfterMusicInterrupt = false;
           this.currentPlayItem = null;
           const nextVoice = this.queue.shift();
-          await this.streamVoiceSegment(tracks, nextVoice, this.resolveVoiceTiming(nextVoice, 3, 3));
+          this.clearVoiceReadyInterrupt();
+          await this.streamVoiceSegment(tracks, nextVoice, this.resolveVoiceTiming(nextVoice, this.voicePreludeSecondsUntilReady(), 3));
           this.nextVoiceAllowedAt = Date.now() + nextVoice.delayAfterMs;
           this.updateStatus({
             mode: "music_between_voice",
@@ -462,6 +512,7 @@ class BroadcastStream {
             musicQueue: this.getPublicMusicQueue(),
             currentPlay: null,
           });
+          this.scheduleVoiceReadyInterrupt();
         }
         break;
       }
@@ -691,10 +742,12 @@ class BroadcastStream {
     const result = await this.runFfmpeg(args, segmentDuration * 1000 + 8000, {
       onProcess: (process) => {
         this.activeLiveProcess = process;
+        this.scheduleVoiceReadyInterrupt();
       },
     });
     this.activeLiveProcess = null;
     this.activeLiveSegment = null;
+    this.clearVoiceReadyInterrupt();
 
     if (this.liveInterruptedForMusic) {
       const elapsed = Math.max(0.1, Math.min(segmentDuration, (Date.now() - segmentStartedAt) / 1000));
@@ -875,7 +928,6 @@ class BroadcastStream {
 
   async streamVoiceSegment(tracks, item, options = {}) {
     const admin = await readAdminConfig(this.config);
-    this.currentMusic = null;
     const voiceDuration = await this.probeDuration(item.voicePath);
     const preludeSeconds = Math.max(0, Number(options.preludeSeconds) || 0);
     const postludeSeconds = Math.max(0, Number(options.postludeSeconds) || 0);
@@ -886,6 +938,7 @@ class BroadcastStream {
     const voiceEnd = voiceStart + voiceDuration + 0.35;
     const totalDuration = Math.max(4, voiceEnd + restoreFadeSeconds + postludeSeconds + 0.9);
     const musicBedSegments = await this.buildMusicBedSegments(tracks, totalDuration);
+    this.setCurrentMusicBed(musicBedSegments);
     const normalMusic = clamp(admin.audioMix?.musicLevel ?? 0.72);
     const voiceLevel = clamp(admin.audioMix?.voiceLevel ?? 1);
     const voiceGain = clampGain(voiceLevel * 2.4);
@@ -1024,6 +1077,8 @@ class BroadcastStream {
       segments.push({
         trackIndex,
         path: trackPath,
+        file: track.file,
+        title: track.title,
         start: offset,
         duration,
         trackDuration,
@@ -1041,6 +1096,8 @@ class BroadcastStream {
       segments.push({
         trackIndex: this.currentTrackIndex % tracks.length,
         path: trackPath,
+        file: track.file,
+        title: track.title,
         start: 0,
         duration: seconds,
         trackDuration: seconds,
@@ -1267,9 +1324,55 @@ class BroadcastStream {
     };
   }
 
+  setCurrentMusicBed(segments) {
+    if (!Array.isArray(segments) || !segments.length) {
+      this.currentMusic = null;
+      return;
+    }
+
+    this.currentMusic = {
+      kind: "live-bed",
+      segments: segments.map((segment) => ({
+        file: segment.file || "",
+        title: segment.title || "Live music",
+        durationSeconds: Number.isFinite(segment.trackDuration) ? Math.max(0, segment.trackDuration) : 0,
+        positionSeconds: Number.isFinite(segment.start) ? Math.max(0, segment.start) : 0,
+        segmentDuration: Number.isFinite(segment.duration) ? Math.max(0, segment.duration) : 0,
+      })),
+      startedAt: Date.now(),
+    };
+  }
+
   getPublicCurrentMusic() {
     if (!this.currentMusic) return null;
     const elapsed = Math.max(0, (Date.now() - this.currentMusic.startedAt) / 1000);
+    if (Array.isArray(this.currentMusic.segments) && this.currentMusic.segments.length) {
+      let segmentElapsed = elapsed;
+      let activeSegment = this.currentMusic.segments[this.currentMusic.segments.length - 1];
+
+      for (const segment of this.currentMusic.segments) {
+        if (segmentElapsed <= segment.segmentDuration) {
+          activeSegment = segment;
+          break;
+        }
+        segmentElapsed -= segment.segmentDuration;
+      }
+
+      const duration = activeSegment.durationSeconds;
+      const position = duration > 0
+        ? Math.min(duration, activeSegment.positionSeconds + segmentElapsed)
+        : activeSegment.positionSeconds + segmentElapsed;
+      return {
+        kind: this.currentMusic.kind,
+        file: activeSegment.file,
+        title: activeSegment.title,
+        durationSeconds: duration,
+        positionSeconds: position,
+        remainingSeconds: duration > 0 ? Math.max(0, duration - position) : 0,
+        progress: duration > 0 ? Math.min(1, Math.max(0, position / duration)) : 0,
+      };
+    }
+
     const duration = this.currentMusic.durationSeconds;
     const position = duration > 0
       ? Math.min(duration, this.currentMusic.positionSeconds + elapsed)

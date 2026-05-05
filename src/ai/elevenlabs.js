@@ -3,7 +3,16 @@ const path = require("node:path");
 const { hash } = require("../music");
 const { fetchWithTimeout } = require("../http");
 
+let ttsQueue = Promise.resolve();
+
 async function synthesize(config, outputDir, text, options = {}) {
+  const run = () => synthesizeUnlocked(config, outputDir, text, options);
+  const task = ttsQueue.then(run, run);
+  ttsQueue = task.catch(() => {});
+  return task;
+}
+
+async function synthesizeUnlocked(config, outputDir, text, options = {}) {
   if (!config.apiKey || !config.voiceId) return null;
 
   await fs.promises.mkdir(outputDir, { recursive: true });
@@ -34,7 +43,7 @@ async function synthesize(config, outputDir, text, options = {}) {
   }, 90_000);
 
   if (!response.ok) {
-    throw new Error(`ElevenLabs ${response.status}: ${await response.text()}`);
+    throw new Error(`ElevenLabs ${response.status}: ${summarizeErrorBody(await response.text())}`);
   }
 
   const bytes = Buffer.from(await response.arrayBuffer());
@@ -74,6 +83,29 @@ function clamp(value, fallback, min, max) {
   return Math.min(Math.max(number, min), max);
 }
 
+function summarizeErrorBody(value) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "empty response";
+
+  try {
+    const payload = JSON.parse(text);
+    return String(payload.detail?.message || payload.message || payload.error || text).slice(0, 500);
+  } catch {}
+
+  const title = text.match(/<title[^>]*>(.*?)<\/title>/i)?.[1];
+  if (title) return `${stripHtml(title)} (${stripHtml(text).slice(0, 320)})`;
+  return stripHtml(text).slice(0, 500);
+}
+
+function stripHtml(value) {
+  return String(value || "")
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 async function pingElevenLabs(config) {
   const startedAt = Date.now();
 
@@ -88,7 +120,7 @@ async function pingElevenLabs(config) {
     const text = await response.text();
 
     if (!response.ok) {
-      throw new Error(`${response.status}: ${text}`);
+      throw new Error(`${response.status}: ${summarizeErrorBody(text)}`);
     }
 
     let payload = {};

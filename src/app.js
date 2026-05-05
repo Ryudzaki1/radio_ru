@@ -286,18 +286,14 @@ function createServer(config) {
         const body = await readJson(request);
         const payload = await createAnnouncement(config, body);
         const event = { ...payload, title: "Подводка к треку", source: "admin" };
-        broadcast.enqueueVoice(event);
-        await emitRadio("voice", event);
-        await sendJson(response, 200, payload);
+        await sendGeneratedVoice(response, config, broadcast, event, payload);
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/greeting") {
         const payload = await createGreeting(config);
         const event = { ...payload, title: "Приветствие", source: "admin" };
-        broadcast.enqueueVoice(event);
-        await emitRadio("voice", event);
-        await sendJson(response, 200, payload);
+        await sendGeneratedVoice(response, config, broadcast, event, payload);
         return;
       }
 
@@ -305,18 +301,14 @@ function createServer(config) {
         const body = await readJson(request);
         const payload = await createFact(config, body);
         const event = { ...payload, title: "Тема эфира", source: "admin" };
-        broadcast.enqueueVoice(event);
-        await emitRadio("voice", event);
-        await sendJson(response, 200, payload);
+        await sendGeneratedVoice(response, config, broadcast, event, payload);
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/farewell") {
         const payload = await createFarewell(config);
         const event = { ...payload, title: "Прощание", source: "admin" };
-        broadcast.enqueueVoice(event);
-        await emitRadio("voice", event);
-        await sendJson(response, 200, payload);
+        await sendGeneratedVoice(response, config, broadcast, event, payload);
         return;
       }
 
@@ -361,6 +353,36 @@ function enqueueListenerQuestion(config, broadcast, question) {
   );
 }
 
+async function sendGeneratedVoice(response, config, broadcast, event, payload) {
+  if (!payload.audioUrl) {
+    const error = payload.audioError || "Voice audio was not created";
+    await writeSystemLog(config, "voice_generation_failed", {
+      title: event.title || null,
+      source: event.source || null,
+      kind: payload.kind || null,
+      error,
+    });
+    await sendJson(response, 502, { ...payload, queued: false, error });
+    return;
+  }
+
+  const queued = broadcast.enqueueVoice(event);
+  if (!queued) {
+    const error = "Generated audio could not be resolved for broadcast";
+    await writeSystemLog(config, "voice_enqueue_failed", {
+      title: event.title || null,
+      source: event.source || null,
+      audioUrl: payload.audioUrl,
+      error,
+    });
+    await sendJson(response, 500, { ...payload, queued: false, error });
+    return;
+  }
+
+  await emitRadio("voice", event);
+  await sendJson(response, 200, { ...payload, queued: true });
+}
+
 async function processListenerQuestion(config, broadcast, question, queueVersion) {
   try {
     if (queueVersion !== listenerQueueVersion) return null;
@@ -369,11 +391,30 @@ async function processListenerQuestion(config, broadcast, question, queueVersion
 
     const payload = await createListenerQuestion(config, question);
     if (queueVersion !== listenerQueueVersion) return null;
+    const audioError = payload.audioError || "Voice audio was not created";
+    if (!payload.audioUrl) {
+      const updated = await updateQuestion(config, question.id, {
+        status: "voice_error",
+        text: payload.text,
+        audioUrl: null,
+        archivePath: payload.archivePath,
+        error: audioError,
+      });
+      await writeSystemLog(config, "listener_voice_generation_failed", {
+        questionId: question.id,
+        userName: question.userName,
+        error: audioError,
+      });
+      await emitAdmin(config, "listeners", await readListenerStore(config));
+      return updated;
+    }
+
     const updated = await updateQuestion(config, question.id, {
       status: "ready",
       text: payload.text,
       audioUrl: payload.audioUrl,
       archivePath: payload.archivePath,
+      error: null,
     });
     await emitAdmin(config, "listeners", await readListenerStore(config));
     await emitAdmin(config, "archive", { items: await listArchiveItems(config) });

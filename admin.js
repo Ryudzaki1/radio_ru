@@ -405,6 +405,7 @@ async function runTest(url) {
   setStatus("Генерирую тест");
   const response = await fetch(url, { method: "POST" });
   const payload = await response.json();
+  if (!response.ok) throw new Error(payload.error || "Аудио диктора не создано");
   const source = payload.source ? ` [${payload.source}]` : "";
   const label = payload.subtopic ? `${payload.topic} / ${payload.subtopic}` : payload.topic;
   testOutput.textContent = label ? `${label}${source}: ${payload.text}` : (payload.text || payload.error || "");

@@ -306,7 +306,6 @@ p,
   color: var(--amber);
 }
 
-.music-progress.is-voice .progress-bar span,
 .music-progress.is-empty .progress-bar span {
   width: 0% !important;
 }

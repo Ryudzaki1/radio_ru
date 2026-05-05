@@ -124,14 +124,19 @@ async function createArchivedVoice(config, item) {
   const admin = await readAdminConfig(config);
   const archive = getArchivePaths(config, item);
   const uniqueKind = `${item.kind}:${item.topic || item.theme}:${item.subtopic || ""}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
-  const audio = await synthesize(config.elevenlabs, archive.dir, item.text, {
-    kind: uniqueKind,
-    publicUrlPrefix: archive.publicUrlPrefix,
-    voice: admin.voice,
-  }).catch((error) => {
+  let audio = null;
+  let audioError = null;
+
+  try {
+    audio = await synthesize(config.elevenlabs, archive.dir, item.text, {
+      kind: uniqueKind,
+      publicUrlPrefix: archive.publicUrlPrefix,
+      voice: admin.voice,
+    });
+  } catch (error) {
+    audioError = error.message;
     console.warn(`ElevenLabs ${item.kind} fallback: ${error.message}`);
-    return null;
-  });
+  }
 
   const payload = {
     text: item.text,
@@ -147,6 +152,7 @@ async function createArchivedVoice(config, item) {
     userName: item.userName,
     question: item.question,
     voiceId: config.elevenlabs.voiceId,
+    audioError,
   };
 
   if (audio?.audioUrl) {
