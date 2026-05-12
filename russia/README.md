@@ -1,0 +1,29 @@
+# Russia node
+
+This folder is the public radio node for the Yandex Cloud VM.
+
+Role:
+- serves the website, player, admin panel, Telegram bot, and `/stream`;
+- keeps the same Node/Docker project logic as the original app;
+- stores local music under `app/music`;
+- calls ElevenLabs through the private EU tunnel using `ELEVENLABS_BASE_URL=http://10.77.0.1:18080`;
+- calls Telegram Bot API through the private EU tunnel using `TELEGRAM_API_BASE_URL=http://10.77.0.1:18081`.
+
+Current test URL:
+
+```text
+http://111.88.144.171/
+http://111.88.144.171/admin.html
+http://111.88.144.171/stream
+```
+
+When the domain is ready, point `radio.ryudzaki.website` to `111.88.144.171` with DNS-only mode.
+
+Layout:
+
+```text
+app/      full radio application copy for the Russia node
+scripts/  helper scripts for Yandex deployment and checks
+```
+
+Do not commit `app/.env` or real audio files unless you intentionally want them in GitHub.

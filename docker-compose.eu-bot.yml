@@ -1,0 +1,28 @@
+services:
+  telegram-bot-eu:
+    build: .
+    container_name: ai-chill-radio-bot-eu
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RADIO_INTERNAL_URL: ${RADIO_INTERNAL_URL:-http://10.77.0.2:18082}
+      PUBLIC_RADIO_URL: ${PUBLIC_RADIO_URL:-http://111.88.144.171}
+      TELEGRAM_API_BASE_URL: ${TELEGRAM_API_BASE_URL:-https://api.telegram.org}
+      LISTENER_API_TOKEN: ${LISTENER_API_TOKEN}
+      BOT_ALLOWED_TELEGRAM_IDS: ${BOT_ALLOWED_TELEGRAM_IDS:-}
+      BOT_ALLOWED_USERNAMES: ${BOT_ALLOWED_USERNAMES:-}
+      BOT_ADMIN_TELEGRAM_IDS: ${BOT_ADMIN_TELEGRAM_IDS:-}
+      BOT_ADMIN_USERNAMES: ${BOT_ADMIN_USERNAMES:-}
+      BOT_NOTIFY_CHAT_IDS: ${BOT_NOTIFY_CHAT_IDS:-}
+      BOT_LINK_STATE_PATH: /cache/config/bot-link.json
+      PUBLIC_URL_STATE_PATH: /cache/config/public-url.json
+      LISTENER_STORE_PATH: /cache/config/listeners.json
+    volumes:
+      - eu-bot-cache:/cache
+    command: ["node", "bot/bot.js"]
+    healthcheck:
+      disable: true
+
+volumes:
+  eu-bot-cache:
