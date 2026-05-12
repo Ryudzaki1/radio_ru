@@ -12,6 +12,7 @@ ENV FACT_LOG_PATH=/cache/config/fact-log.json
 
 COPY package.json ./
 COPY server.js index.html script.js styles.css admin.html admin.js ./
+COPY assets ./assets
 COPY src ./src
 COPY bot ./bot
 

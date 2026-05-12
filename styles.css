@@ -97,7 +97,7 @@ textarea {
 .public-app {
   min-height: 100vh;
   place-content: center;
-  width: min(760px, calc(100% - 28px));
+  width: min(920px, calc(100% - 28px));
 }
 
 .player,
@@ -119,6 +119,203 @@ textarea {
 .public-player {
   padding: clamp(20px, 4vw, 34px);
   box-shadow: var(--shadow);
+}
+
+.host-scene {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  aspect-ratio: 1 / 1;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 12px;
+  background: #0b0d13;
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.28);
+}
+
+.host-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transform: scale(1.012);
+  transform-origin: 52% 48%;
+  animation: hostBreath 7s ease-in-out infinite;
+}
+
+.host-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 50% 42%, transparent 0 34%, rgba(0, 0, 0, 0.18) 66%, rgba(0, 0, 0, 0.42) 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.10));
+}
+
+.host-onair,
+.host-card,
+.host-eq,
+.host-mouth,
+.host-button-glow {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.host-onair {
+  top: 16px;
+  right: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid rgba(255, 77, 139, 0.46);
+  border-radius: 999px;
+  background: rgba(14, 10, 18, 0.58);
+  color: #ffdbe9;
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0;
+  box-shadow: 0 0 22px rgba(255, 40, 118, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.host-onair span {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4f9a;
+  box-shadow: 0 0 0 5px rgba(255, 79, 154, 0.15), 0 0 16px rgba(255, 79, 154, 0.78);
+  animation: hostPulse 1.8s ease-in-out infinite;
+}
+
+.host-card {
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  display: grid;
+  gap: 5px;
+  min-height: 62px;
+  padding: 12px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  background: rgba(11, 12, 18, 0.66);
+  color: #ffffff;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(12px);
+}
+
+.host-card span {
+  color: #ff9fca;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.host-card strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: clamp(15px, 2.8vw, 18px);
+  line-height: 1.18;
+}
+
+.host-mouth {
+  display: none;
+  left: 52.4%;
+  top: 43.1%;
+  width: 4.7%;
+  height: 2.7%;
+  opacity: 0;
+  border-radius: 30% 30% 48% 48%;
+  background:
+    linear-gradient(180deg, rgba(255, 170, 118, 0.86), rgba(108, 31, 32, 0.92) 58%, rgba(28, 8, 13, 0.94));
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.32), 0 0 10px rgba(255, 94, 126, 0.20);
+  transform: translate(-50%, -50%) scaleY(0.38);
+  transform-origin: 50% 15%;
+}
+
+.host-eq {
+  left: 48.5%;
+  bottom: 15.6%;
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 28px;
+  opacity: 0.82;
+  transform: rotate(-2deg);
+}
+
+.host-eq i {
+  display: block;
+  width: 5px;
+  height: 9px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, #a8ff7a, #ffae39);
+  box-shadow: 0 0 10px rgba(255, 174, 57, 0.35);
+  animation: hostEq 1.6s ease-in-out infinite;
+}
+
+.host-eq i:nth-child(2) {
+  animation-delay: -0.3s;
+}
+
+.host-eq i:nth-child(3) {
+  animation-delay: -0.7s;
+}
+
+.host-eq i:nth-child(4) {
+  animation-delay: -0.15s;
+}
+
+.host-eq i:nth-child(5) {
+  animation-delay: -0.55s;
+}
+
+.host-button-glow {
+  left: 51.4%;
+  bottom: 15.4%;
+  width: 8.6%;
+  height: 3.5%;
+  opacity: 0;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(255, 210, 76, 0.74), rgba(255, 79, 154, 0.26) 46%, transparent 70%);
+  filter: blur(3px);
+}
+
+.host-scene.is-speaking .host-image {
+  animation-duration: 4.8s;
+}
+
+.host-scene.is-speaking .host-mouth {
+  opacity: 0.88;
+  animation: hostTalk 360ms steps(2, end) infinite;
+}
+
+.host-scene.is-speaking .host-onair {
+  border-color: rgba(255, 79, 154, 0.76);
+  box-shadow: 0 0 32px rgba(255, 40, 118, 0.32);
+}
+
+.host-scene.is-speaking .host-card {
+  border-color: rgba(255, 159, 202, 0.34);
+}
+
+.host-scene.is-switching .host-button-glow {
+  animation: hostButtonPress 1.2s ease-out 2;
+}
+
+.host-scene.is-switching .host-card {
+  animation: hostCardSwitch 700ms ease-out;
+}
+
+.host-scene.is-switching .host-image {
+  animation: hostSwitchMove 2.2s ease-in-out, hostBreath 7s ease-in-out 2.2s infinite;
+}
+
+.host-scene.is-play-insert .host-card span {
+  color: #a8ff7a;
 }
 
 .topbar,
@@ -962,6 +1159,92 @@ html[data-theme="dark"] audio {
   color-scheme: dark;
 }
 
+@keyframes hostBreath {
+  0%,
+  100% {
+    transform: scale(1.012) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.022) translate3d(0, -0.45%, 0);
+  }
+}
+
+@keyframes hostPulse {
+  0%,
+  100% {
+    opacity: 0.72;
+    transform: scale(0.88);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes hostTalk {
+  0% {
+    transform: translate(-50%, -50%) scaleY(0.28) scaleX(0.86);
+  }
+  50% {
+    transform: translate(-50%, -50%) scaleY(1) scaleX(1.08);
+  }
+  100% {
+    transform: translate(-50%, -50%) scaleY(0.54) scaleX(0.94);
+  }
+}
+
+@keyframes hostEq {
+  0%,
+  100% {
+    height: 8px;
+  }
+  35% {
+    height: 24px;
+  }
+  70% {
+    height: 13px;
+  }
+}
+
+@keyframes hostButtonPress {
+  0% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+  22% {
+    opacity: 1;
+    transform: scale(1.16);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.75);
+  }
+}
+
+@keyframes hostCardSwitch {
+  0% {
+    transform: translateY(7px);
+    opacity: 0.42;
+  }
+  100% {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes hostSwitchMove {
+  0%,
+  100% {
+    transform: scale(1.012) translate3d(0, 0, 0);
+  }
+  40% {
+    transform: scale(1.022) translate3d(0.45%, -0.35%, 0);
+  }
+  70% {
+    transform: scale(1.018) translate3d(-0.28%, -0.15%, 0);
+  }
+}
+
 @keyframes adminFade {
   from {
     opacity: 0;
@@ -1054,6 +1337,26 @@ html[data-theme="dark"] audio {
 
   .volume {
     min-width: 0;
+  }
+
+  .host-scene {
+    border-radius: 10px;
+  }
+
+  .host-onair {
+    top: 10px;
+    right: 10px;
+    min-height: 28px;
+    padding: 0 9px;
+    font-size: 10px;
+  }
+
+  .host-card {
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    min-height: 54px;
+    padding: 10px 11px;
   }
 
   .track {

@@ -20,7 +20,7 @@ if (!token || !listenerApiToken) {
 let offset = 0;
 
 scheduleRadioLinkNotification();
-setupBotCommands().catch((error) => console.error(`bot commands error: ${error.message}`));
+setupBotInterface().catch((error) => console.error(`bot interface error: ${error.message}`));
 
 poll().catch((error) => {
   console.error(error);
@@ -55,14 +55,16 @@ async function handleMessage(message) {
   const profileName = getProfileName(message.from);
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
 
-  if (!isBotUserAllowed(message.from)) {
-    await sendAccessDenied(chatId);
-    return;
-  }
+  const canAskQuestions = isQuestionUserAllowed(message.from);
 
   if (command === "/start") {
-    const result = await radio("/api/listeners/start", { telegramId, username, name: profileName });
     const currentPublicUrl = await getPublicRadioUrl();
+    if (!canAskQuestions) {
+      await sendListenOnlyIntro(chatId, currentPublicUrl);
+      return;
+    }
+
+    const result = await radio("/api/listeners/start", { telegramId, username, name: profileName });
     if (!result.ok) {
       await sendRegistrationError(chatId, result);
       return;
@@ -90,12 +92,23 @@ async function handleMessage(message) {
   }
 
   if (command === "/question") {
+    if (!canAskQuestions) {
+      await sendListenOnly(chatId, await getPublicRadioUrl());
+      return;
+    }
     await sendQuestionPrompt(chatId);
     return;
   }
 
   if (text.startsWith("/")) {
-    await send(chatId, "Доступные команды: /radio — ссылка на эфир, /question — задать вопрос.");
+    await send(chatId, canAskQuestions
+      ? "Доступные команды: /radio — открыть эфир, /question — задать вопрос."
+      : "Доступная команда: /radio — открыть эфир.");
+    return;
+  }
+
+  if (!canAskQuestions) {
+    await sendListenOnly(chatId, await getPublicRadioUrl());
     return;
   }
 
@@ -138,7 +151,7 @@ async function handleMessage(message) {
     return;
   }
   if (!accepted.ok && accepted.reason === "empty") {
-    await send(chatId, "Пришли вопрос текстом, чтобы я поставила его в очередь эфира. Пустые сообщения лимит не тратят.");
+    await send(chatId, "Пришли вопрос текстом. Пустые сообщения лимит не тратят.");
     return;
   }
   if (!accepted.ok) {
@@ -146,11 +159,11 @@ async function handleMessage(message) {
     return;
   }
 
-  await send(chatId, [
+  await sendRadioLink(chatId, [
     "Вопрос принят в очередь эфира.",
     `Осталось бесплатных вопросов: ${formatRemaining(accepted.user)}.`,
     "Открой эфир и слушай: Sweetie Fox ответит в общей очереди.",
-  ].join("\n"));
+  ].join("\n"), await getPublicRadioUrl());
 }
 
 async function sendStartIntro(chatId, publicUrl) {
@@ -159,7 +172,7 @@ async function sendStartIntro(chatId, publicUrl) {
     "",
     `<a href="${escapeHtml(publicUrl)}">Открыть эфир Sweetie Fox</a>`,
     "",
-    "Открой ссылку, нажми Play в браузере, а потом напиши здесь свое имя.",
+    "Открой эфир, нажми Play, а потом напиши здесь свое имя.",
     "После этого каждое новое сообщение в этом чате будет вопросом для диктора.",
     "",
     "Как тебя зовут?",
@@ -174,7 +187,26 @@ async function sendIntro(chatId, name, publicUrl) {
     "",
     "Теперь каждое новое сообщение в этом чате будет вопросом для Sweetie Fox в эфире.",
   ].join("\n"), publicUrl);
-  await send(chatId, "Какой факт ты хочешь услышать от Sweetie Fox?");
+  await sendQuestionPrompt(chatId);
+}
+
+async function sendListenOnlyIntro(chatId, publicUrl) {
+  await sendRadioLink(chatId, [
+    "Привет. Сейчас бот работает в режиме прослушивания эфира.",
+    "",
+    `<a href="${escapeHtml(publicUrl)}">Открыть эфир Sweetie Fox</a>`,
+    "",
+    "Нажми кнопку, открой радио внутри Telegram и включи Play.",
+    "Вопросы диктору сейчас закрыты для обычных слушателей.",
+  ].join("\n"), publicUrl);
+}
+
+async function sendListenOnly(chatId, publicUrl) {
+  await sendRadioLink(chatId, [
+    "Сейчас доступно только прослушивание эфира.",
+    "",
+    `<a href="${escapeHtml(publicUrl)}">Открыть эфир Sweetie Fox</a>`,
+  ].join("\n"), publicUrl);
 }
 
 async function sendQuestionPrompt(chatId) {
@@ -238,31 +270,41 @@ async function sendRadioLink(chatId, text, url) {
     text,
     parse_mode: "HTML",
     disable_web_page_preview: true,
-    reply_markup: {
-      inline_keyboard: [[
-        { text: "Слушать эфир", url },
-      ]],
+    reply_markup: buildRadioReplyMarkup(url),
+  });
+}
+
+async function setupBotInterface() {
+  await telegram("setMyCommands", {
+    commands: [
+      { command: "start", description: "Запуск и регистрация" },
+      { command: "radio", description: "Открыть эфир" },
+      { command: "question", description: "Задать вопрос Sweetie Fox" },
+    ],
+  });
+  await setupBotMenu(await getPublicRadioUrl());
+}
+
+async function setupBotMenu(url) {
+  if (!isWebAppUrl(url)) return;
+  await telegram("setChatMenuButton", {
+    menu_button: {
+      type: "web_app",
+      text: "Слушать эфир",
+      web_app: { url },
     },
   });
 }
 
-async function sendRadioLink(chatId, text, url) {
-  await telegram("sendMessage", {
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML",
-    disable_web_page_preview: true,
-  });
-}
-
-async function setupBotCommands() {
-  await telegram("setMyCommands", {
-    commands: [
-      { command: "start", description: "Запуск и регистрация" },
-      { command: "radio", description: "Получить актуальную ссылку на эфир" },
-      { command: "question", description: "Задать вопрос Sweetie Fox" },
-    ],
-  });
+function buildRadioReplyMarkup(url) {
+  const keyboard = [];
+  if (isWebAppUrl(url)) {
+    keyboard.push([{ text: "Слушать в Telegram", web_app: { url } }]);
+    keyboard.push([{ text: "Открыть в браузере", url }]);
+  } else if (isValidPublicUrl(url)) {
+    keyboard.push([{ text: "Слушать эфир", url }]);
+  }
+  return keyboard.length ? { inline_keyboard: keyboard } : undefined;
 }
 
 function escapeHtml(value) {
@@ -287,7 +329,7 @@ function parseList(value) {
     .filter(Boolean);
 }
 
-function isBotUserAllowed(from = {}) {
+function isQuestionUserAllowed(from = {}) {
   if (!allowedTelegramIds.length && !allowedUsernames.length) return true;
   const telegramId = String(from.id || "");
   const username = String(from.username || "").trim().toLowerCase();
@@ -319,80 +361,13 @@ function isValidPublicUrl(value) {
   }
 }
 
-async function notifyRadioLinkChange() {
-  const currentPublicUrl = await getPublicRadioUrl();
-  if (!currentPublicUrl || !notifyChatIds.length || !linkStatePath) return;
-
-  let previousUrl = "";
+function isWebAppUrl(value) {
   try {
-    previousUrl = JSON.parse(await fs.promises.readFile(linkStatePath, "utf8")).url || "";
-  } catch {}
-
-  if (previousUrl === currentPublicUrl) return;
-
-  for (const chatId of notifyChatIds) {
-    await sendRadioLink(chatId, [
-      "Ссылка на эфир обновилась.",
-      "",
-      `<a href="${escapeHtml(publicRadioUrl)}">Открыть эфир Sweetie Fox</a>`,
-    ].join("\n"), publicRadioUrl);
+    const url = new URL(String(value || ""));
+    return url.protocol === "https:";
+  } catch {
+    return false;
   }
-
-  await fs.promises.mkdir(path.dirname(linkStatePath), { recursive: true });
-  await fs.promises.writeFile(linkStatePath, JSON.stringify({
-    url: publicRadioUrl,
-    updatedAt: new Date().toISOString(),
-  }, null, 2), "utf8");
-}
-
-function scheduleRadioLinkNotification(attempt = 1) {
-  notifyRadioLinkChange().catch((error) => {
-    console.error(`radio link notification error: ${error.message}`);
-    const nextAttempt = attempt + 1;
-    const timeout = Math.min(60_000, 5_000 * nextAttempt);
-    setTimeout(() => scheduleRadioLinkNotification(nextAttempt), timeout);
-  });
-}
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-async function notifyRadioLinkChange() {
-  const currentPublicUrl = await getPublicRadioUrl();
-  if (!currentPublicUrl || !notifyChatIds.length || !linkStatePath) return;
-
-  let previousUrl = "";
-  try {
-    previousUrl = JSON.parse(await fs.promises.readFile(linkStatePath, "utf8")).url || "";
-  } catch {}
-
-  if (previousUrl === currentPublicUrl) return;
-
-  for (const chatId of notifyChatIds) {
-    await sendRadioLink(chatId, [
-      "Ссылка на эфир обновилась.",
-      "",
-      `<a href="${escapeHtml(currentPublicUrl)}">Открыть эфир Sweetie Fox</a>`,
-    ].join("\n"), currentPublicUrl);
-  }
-
-  await fs.promises.mkdir(path.dirname(linkStatePath), { recursive: true });
-  await fs.promises.writeFile(linkStatePath, JSON.stringify({
-    url: currentPublicUrl,
-    updatedAt: new Date().toISOString(),
-  }, null, 2), "utf8");
-}
-
-function scheduleRadioLinkNotification(attempt = 1) {
-  notifyRadioLinkChange().then(() => {
-    setTimeout(() => scheduleRadioLinkNotification(1), 30_000);
-  }).catch((error) => {
-    console.error(`radio link notification error: ${error.message}`);
-    const nextAttempt = attempt + 1;
-    const timeout = Math.min(60_000, 5_000 * nextAttempt);
-    setTimeout(() => scheduleRadioLinkNotification(nextAttempt), timeout);
-  });
 }
 
 async function notifyRadioLinkChange() {
@@ -406,6 +381,10 @@ async function notifyRadioLinkChange() {
     previousUrl = state.url || "";
     history = Array.isArray(state.history) ? state.history : [];
   } catch {}
+
+  await setupBotMenu(currentPublicUrl).catch((error) => {
+    console.error(`bot menu update error: ${error.message}`);
+  });
 
   if (previousUrl === currentPublicUrl) return;
 
@@ -437,6 +416,17 @@ async function notifyRadioLinkChange() {
   }, null, 2), "utf8");
 }
 
+function scheduleRadioLinkNotification(attempt = 1) {
+  notifyRadioLinkChange().then(() => {
+    setTimeout(() => scheduleRadioLinkNotification(1), 30_000);
+  }).catch((error) => {
+    console.error(`radio link notification error: ${error.message}`);
+    const nextAttempt = attempt + 1;
+    const timeout = Math.min(60_000, 5_000 * nextAttempt);
+    setTimeout(() => scheduleRadioLinkNotification(nextAttempt), timeout);
+  });
+}
+
 async function getLinkNotificationChatIds() {
   const ids = new Set(notifyChatIds);
   try {
@@ -457,6 +447,10 @@ async function getLinkNotificationChatIds() {
     }
   } catch {}
   return [...ids].filter(Boolean);
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {

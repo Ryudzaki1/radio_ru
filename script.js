@@ -16,6 +16,10 @@ const progressTitle = document.querySelector("#progressTitle");
 const progressFill = document.querySelector("#progressFill");
 const progressElapsed = document.querySelector("#progressElapsed");
 const progressRemaining = document.querySelector("#progressRemaining");
+const hostScene = document.querySelector("#hostScene");
+const hostImage = document.querySelector("#hostImage");
+const hostMood = document.querySelector("#hostMood");
+const hostTrackTitle = document.querySelector("#hostTrackTitle");
 const nextButton = document.querySelector("#nextButton");
 const refreshButton = document.querySelector("#refreshButton");
 const syncMusicButton = document.querySelector("#syncMusicButton");
@@ -34,8 +38,30 @@ let stalledTimer = 0;
 let reconnecting = false;
 let latestStreamState = {};
 let latestStateReceivedAt = 0;
+let lastHostTrackKey = "";
+let hostTransitionTimer = 0;
+
+const hostTalkFrames = [
+  "/assets/host-mouth-closed.webp",
+  "/assets/host-talk-loop-01.webp",
+  "/assets/host-talk-loop-02.webp",
+  "/assets/host-talk-loop-03.webp",
+  "/assets/host-talk-loop-04.webp",
+  "/assets/host-talk-loop-05.webp",
+  "/assets/host-talk-loop-06.webp",
+  "/assets/host-talk-loop-07.webp",
+  "/assets/host-talk-loop-08.webp",
+  "/assets/host-talk-loop-09.webp",
+  "/assets/host-talk-loop-10.webp",
+  "/assets/host-talk-loop-11.webp",
+  "/assets/host-talk-loop-12.webp",
+];
+const hostClosedFrame = hostTalkFrames[0];
+const hostTalkLoops = hostTalkFrames.slice(1);
+let hostIsTalking = false;
 
 applySavedTheme();
+preloadHostFrames();
 
 themeToggle?.addEventListener("click", () => {
   const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -252,7 +278,68 @@ function renderRadioState(stream, serverNow = Date.now()) {
     announcerText.textContent = "Дикторские включения приходят в этот же live-поток. Отдельный голосовой плеер на странице не используется.";
   }
   renderQueuedTrackState();
+  updateHostScene(stream, mode, title);
   renderMusicProgress();
+}
+
+function updateHostScene(stream, mode, title) {
+  if (!hostScene) return;
+
+  const isSpeaking = mode === "voice" && Math.max(0, Number(stream.voiceStartsInMs) || 0) <= 0;
+  const isVoiceMode = isSpeaking || mode === "voice_prelude" || mode === "voice_ducking";
+  const isOrderedMusic = mode === "play_music" || stream.currentPlay || stream.currentMusic?.kind === "play";
+  const music = stream.currentMusic || stream.currentPlay || {};
+  const trackTitle = music.title || title || "Live radio";
+  const trackKey = `${music.kind || mode}:${music.file || trackTitle}`;
+  const hasTrackChange = Boolean(lastHostTrackKey && trackKey && trackKey !== lastHostTrackKey && !isVoiceMode);
+
+  hostScene.classList.toggle("is-speaking", isSpeaking);
+  hostScene.classList.toggle("is-listening", !isVoiceMode);
+  hostScene.classList.toggle("is-play-insert", Boolean(isOrderedMusic));
+  hostScene.classList.toggle("is-voice-waiting", mode === "voice_prelude" || mode === "voice_ducking");
+  setHostTalking(isSpeaking);
+
+  if (hostMood) {
+    hostMood.textContent = isVoiceMode
+      ? "ON AIR VOICE"
+      : isOrderedMusic
+        ? "PLAY INSERT"
+        : "CHILL MODE";
+  }
+  if (hostTrackTitle) hostTrackTitle.textContent = trackTitle;
+
+  if (hasTrackChange) {
+    hostScene.classList.add("is-switching");
+    window.clearTimeout(hostTransitionTimer);
+    hostTransitionTimer = window.setTimeout(() => {
+      hostScene.classList.remove("is-switching");
+    }, 2400);
+  }
+
+  if (trackKey) lastHostTrackKey = trackKey;
+}
+
+function setHostTalking(isTalking) {
+  if (!hostImage) return;
+
+  if (!isTalking) {
+    if (!hostIsTalking) return;
+    hostIsTalking = false;
+    hostImage.src = hostClosedFrame;
+    return;
+  }
+
+  if (hostIsTalking) return;
+  hostIsTalking = true;
+  const loop = hostTalkLoops[Math.floor(Math.random() * hostTalkLoops.length)] || hostTalkLoops[0];
+  hostImage.src = loop;
+}
+
+function preloadHostFrames() {
+  for (const frame of hostTalkFrames) {
+    const image = new Image();
+    image.src = frame;
+  }
 }
 
 function renderTracks(container, tracks, options = {}) {

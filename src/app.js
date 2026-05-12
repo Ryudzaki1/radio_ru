@@ -19,6 +19,10 @@ const staticTypes = new Map([
   [".html", "text/html; charset=utf-8"],
   [".css", "text/css; charset=utf-8"],
   [".js", "text/javascript; charset=utf-8"],
+  [".png", "image/png"],
+  [".webp", "image/webp"],
+  [".jpg", "image/jpeg"],
+  [".jpeg", "image/jpeg"],
 ]);
 
 const radioClients = new Set();
@@ -59,6 +63,13 @@ function createServer(config) {
       if ((request.method === "GET" || request.method === "HEAD") && publicFiles.has(url.pathname)) {
         const filePath = url.pathname === "/" ? path.join(config.rootDir, "index.html") : path.join(config.rootDir, url.pathname);
         await sendFile(request, response, filePath, staticTypes.get(path.extname(filePath)) || "text/plain");
+        return;
+      }
+
+      if ((request.method === "GET" || request.method === "HEAD") && url.pathname.startsWith("/assets/")) {
+        const file = decodeURIComponent(url.pathname.slice("/assets/".length));
+        const filePath = resolveInside(path.join(config.rootDir, "assets"), file);
+        await sendFile(request, response, filePath, staticTypes.get(path.extname(filePath)) || "application/octet-stream");
         return;
       }
 
