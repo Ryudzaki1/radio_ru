@@ -57,6 +57,16 @@ const audioMixInputs = {
   postludeSeconds: document.querySelector("#voicePostludeSeconds"),
 };
 
+const sliderValueInputs = {
+  stability: document.querySelector("#stabilityValue"),
+  similarityBoost: document.querySelector("#similarityBoostValue"),
+  style: document.querySelector("#styleValue"),
+  speed: document.querySelector("#speedValue"),
+  musicLevel: document.querySelector("#musicLevelValue"),
+  voiceLevel: document.querySelector("#voiceLevelValue"),
+  duckingRatio: document.querySelector("#duckingRatioValue"),
+};
+
 let currentConfig = null;
 let factLog = { facts: [] };
 let archiveItems = [];
@@ -95,6 +105,7 @@ addTopicButton?.addEventListener("click", addTopic);
 addSubtopicButton?.addEventListener("click", addSubtopic);
 deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
 initHelpTips();
+initSyncedSliders();
 activeHostSelect?.addEventListener("change", () => {
   if (!currentConfig?.prompts) return;
   currentConfig.prompts.activeHostId = getActiveHostId();
@@ -121,6 +132,59 @@ function initHelpTips() {
     tip.setAttribute("tabindex", "0");
     tip.removeAttribute("title");
   });
+}
+
+function initSyncedSliders() {
+  Object.entries(sliderValueInputs).forEach(([key, numberInput]) => {
+    const rangeInput = getSliderInput(key);
+    if (!rangeInput || !numberInput) return;
+
+    rangeInput.addEventListener("input", () => {
+      numberInput.value = formatSliderValue(rangeInput, rangeInput.value);
+    });
+    numberInput.addEventListener("input", () => {
+      if (numberInput.value === "") return;
+      rangeInput.value = formatSliderValue(rangeInput, numberInput.value);
+    });
+    numberInput.addEventListener("blur", () => setSyncedSliderValue(key, numberInput.value || rangeInput.value));
+  });
+}
+
+function getSliderInput(key) {
+  return voiceInputs[key] || audioMixInputs[key] || null;
+}
+
+function setSyncedSliderValue(key, value) {
+  const rangeInput = getSliderInput(key);
+  const numberInput = sliderValueInputs[key];
+  if (!rangeInput) return;
+  const formatted = formatSliderValue(rangeInput, value);
+  rangeInput.value = formatted;
+  if (numberInput) numberInput.value = formatted;
+}
+
+function getSyncedSliderNumber(key) {
+  const rangeInput = getSliderInput(key);
+  const numberInput = sliderValueInputs[key];
+  const rawValue = numberInput?.value !== "" ? numberInput?.value : rangeInput?.value;
+  const formatted = formatSliderValue(rangeInput, rawValue);
+  if (numberInput && numberInput.value !== formatted) numberInput.value = formatted;
+  if (rangeInput && rangeInput.value !== formatted) rangeInput.value = formatted;
+  return Number(formatted);
+}
+
+function formatSliderValue(rangeInput, value) {
+  if (!rangeInput) return "0";
+  const min = Number(rangeInput.min);
+  const max = Number(rangeInput.max);
+  const step = rangeInput.step || "1";
+  const fallback = Number(rangeInput.value) || min || 0;
+  let number = Number(value);
+  if (!Number.isFinite(number)) number = fallback;
+  if (Number.isFinite(min)) number = Math.max(min, number);
+  if (Number.isFinite(max)) number = Math.min(max, number);
+  const decimals = step.includes(".") ? step.split(".")[1].length : 0;
+  return number.toFixed(decimals);
 }
 
 async function loadConfig() {
@@ -159,16 +223,16 @@ function renderConfig(config) {
   farewellPrompt.value = host.farewell || "";
 
   voiceInputs.model.value = config.voice.model || "eleven_multilingual_v2";
-  voiceInputs.stability.value = config.voice.stability;
-  voiceInputs.similarityBoost.value = config.voice.similarityBoost;
-  voiceInputs.style.value = config.voice.style;
-  voiceInputs.speed.value = config.voice.speed;
+  setSyncedSliderValue("stability", config.voice.stability);
+  setSyncedSliderValue("similarityBoost", config.voice.similarityBoost);
+  setSyncedSliderValue("style", config.voice.style);
+  setSyncedSliderValue("speed", config.voice.speed);
   voiceInputs.speakerBoost.checked = config.voice.speakerBoost;
   topicCycleMinInput.value = config.topicCycle?.minIntervalMinutes ?? 5;
   topicCycleMaxInput.value = config.topicCycle?.maxIntervalMinutes ?? 6;
-  audioMixInputs.musicLevel.value = config.audioMix?.musicLevel ?? 0.72;
-  audioMixInputs.voiceLevel.value = config.audioMix?.voiceLevel ?? 1;
-  audioMixInputs.duckingRatio.value = config.audioMix?.duckingRatio ?? 0.18;
+  setSyncedSliderValue("musicLevel", config.audioMix?.musicLevel ?? 0.72);
+  setSyncedSliderValue("voiceLevel", config.audioMix?.voiceLevel ?? 1);
+  setSyncedSliderValue("duckingRatio", config.audioMix?.duckingRatio ?? 0.18);
   audioMixInputs.preludeSeconds.value = config.audioMix?.preludeSeconds ?? 0;
   audioMixInputs.duckFadeSeconds.value = config.audioMix?.duckFadeSeconds ?? 1.6;
   audioMixInputs.restoreFadeSeconds.value = config.audioMix?.restoreFadeSeconds ?? 1.4;
@@ -404,6 +468,7 @@ function setVoiceMusicLock(locked) {
     voiceHostSelect,
     ...Object.values(voiceInputs),
     ...Object.values(audioMixInputs),
+    ...Object.values(sliderValueInputs),
   ].filter(Boolean);
   fields.forEach((field) => {
     field.disabled = locked;
@@ -432,14 +497,14 @@ function restoreVoiceMusicFieldsFromSnapshot() {
   if (voiceHostSelect) voiceHostSelect.value = snapshot.activeHostId;
   if (activeHostSelect) activeHostSelect.value = snapshot.activeHostId;
   if (voiceInputs.model) voiceInputs.model.value = snapshot.voice.model;
-  voiceInputs.stability.value = snapshot.voice.stability;
-  voiceInputs.similarityBoost.value = snapshot.voice.similarityBoost;
-  voiceInputs.style.value = snapshot.voice.style;
-  voiceInputs.speed.value = snapshot.voice.speed;
+  setSyncedSliderValue("stability", snapshot.voice.stability);
+  setSyncedSliderValue("similarityBoost", snapshot.voice.similarityBoost);
+  setSyncedSliderValue("style", snapshot.voice.style);
+  setSyncedSliderValue("speed", snapshot.voice.speed);
   voiceInputs.speakerBoost.checked = snapshot.voice.speakerBoost;
-  audioMixInputs.musicLevel.value = snapshot.audioMix.musicLevel;
-  audioMixInputs.voiceLevel.value = snapshot.audioMix.voiceLevel;
-  audioMixInputs.duckingRatio.value = snapshot.audioMix.duckingRatio;
+  setSyncedSliderValue("musicLevel", snapshot.audioMix.musicLevel);
+  setSyncedSliderValue("voiceLevel", snapshot.audioMix.voiceLevel);
+  setSyncedSliderValue("duckingRatio", snapshot.audioMix.duckingRatio);
   audioMixInputs.preludeSeconds.value = snapshot.audioMix.preludeSeconds;
   audioMixInputs.duckFadeSeconds.value = snapshot.audioMix.duckFadeSeconds;
   audioMixInputs.restoreFadeSeconds.value = snapshot.audioMix.restoreFadeSeconds;
@@ -452,16 +517,16 @@ function getVoiceMusicSnapshot() {
     activeHostId: getActiveHostId(),
     voice: {
       model: voiceInputs.model?.value || "eleven_multilingual_v2",
-      stability: Number(voiceInputs.stability.value),
-      similarityBoost: Number(voiceInputs.similarityBoost.value),
-      style: Number(voiceInputs.style.value),
-      speed: Number(voiceInputs.speed.value),
+      stability: getSyncedSliderNumber("stability"),
+      similarityBoost: getSyncedSliderNumber("similarityBoost"),
+      style: getSyncedSliderNumber("style"),
+      speed: getSyncedSliderNumber("speed"),
       speakerBoost: voiceInputs.speakerBoost.checked,
     },
     audioMix: {
-      musicLevel: Number(audioMixInputs.musicLevel.value),
-      voiceLevel: Number(audioMixInputs.voiceLevel.value),
-      duckingRatio: Number(audioMixInputs.duckingRatio.value),
+      musicLevel: getSyncedSliderNumber("musicLevel"),
+      voiceLevel: getSyncedSliderNumber("voiceLevel"),
+      duckingRatio: getSyncedSliderNumber("duckingRatio"),
       preludeSeconds: Number(audioMixInputs.preludeSeconds.value),
       duckFadeSeconds: Number(audioMixInputs.duckFadeSeconds.value),
       restoreFadeSeconds: Number(audioMixInputs.restoreFadeSeconds.value),
@@ -522,10 +587,10 @@ function collectConfig() {
     },
     voice: {
       model: voiceInputs.model?.value || "eleven_multilingual_v2",
-      stability: Number(voiceInputs.stability.value),
-      similarityBoost: Number(voiceInputs.similarityBoost.value),
-      style: Number(voiceInputs.style.value),
-      speed: Number(voiceInputs.speed.value),
+      stability: getSyncedSliderNumber("stability"),
+      similarityBoost: getSyncedSliderNumber("similarityBoost"),
+      style: getSyncedSliderNumber("style"),
+      speed: getSyncedSliderNumber("speed"),
       speakerBoost: voiceInputs.speakerBoost.checked,
     },
     factPolicy: currentConfig.factPolicy,
@@ -534,9 +599,9 @@ function collectConfig() {
       maxIntervalMinutes: Number(topicCycleMaxInput.value) || 6,
     },
     audioMix: {
-      musicLevel: Number(audioMixInputs.musicLevel.value),
-      voiceLevel: Number(audioMixInputs.voiceLevel.value),
-      duckingRatio: Number(audioMixInputs.duckingRatio.value),
+      musicLevel: getSyncedSliderNumber("musicLevel"),
+      voiceLevel: getSyncedSliderNumber("voiceLevel"),
+      duckingRatio: getSyncedSliderNumber("duckingRatio"),
       preludeSeconds: Number(audioMixInputs.preludeSeconds.value),
       duckFadeSeconds: Number(audioMixInputs.duckFadeSeconds.value),
       restoreFadeSeconds: Number(audioMixInputs.restoreFadeSeconds.value),

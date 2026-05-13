@@ -1235,6 +1235,19 @@ input[type="range"] {
   transform: translate(-50%, 0) rotate(45deg);
 }
 
+.range-value-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) 84px;
+  gap: 10px;
+  align-items: center;
+}
+
+.range-number {
+  width: 84px;
+  min-width: 0;
+  text-align: right;
+}
+
 .voice-controls input:disabled,
 .voice-controls select:disabled {
   opacity: 0.62;
