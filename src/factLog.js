@@ -1,6 +1,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const DEFAULT_HOST_ID = "sweetiefox";
+
 async function readFactLog(config) {
   try {
     const payload = JSON.parse(await fs.promises.readFile(config.factLogPath, "utf8"));
@@ -52,6 +54,8 @@ async function addFactLogEntry(config, entry) {
     audioUrl: entry.audioUrl,
     archivePath: entry.archivePath,
     voiceId: entry.voiceId,
+    hostId: normalizeHostId(entry.hostId),
+    hostName: entry.hostName ? String(entry.hostName) : null,
   });
   log.facts = log.facts.slice(-5000);
   await writeFactLog(config, log);
@@ -97,12 +101,17 @@ function getRecentFacts(log, topicName, subtopicName, limit = 8) {
     .reverse();
 }
 
-function getArchivedFacts(log, voiceId) {
-  return normalizeFactLog(log).facts.filter((fact) => fact.voiceId === voiceId && fact.audioUrl);
+function getArchivedFacts(log, voiceId, hostId = DEFAULT_HOST_ID) {
+  const normalizedHostId = normalizeHostId(hostId);
+  return normalizeFactLog(log).facts.filter((fact) => (
+    fact.voiceId === voiceId
+    && fact.audioUrl
+    && normalizeHostId(fact.hostId) === normalizedHostId
+  ));
 }
 
-function getArchivedFactForSelection(log, voiceId, topicName, subtopicName) {
-  return getArchivedFacts(log, voiceId)
+function getArchivedFactForSelection(log, voiceId, topicName, subtopicName, hostId = DEFAULT_HOST_ID) {
+  return getArchivedFacts(log, voiceId, hostId)
     .filter((fact) => fact.topic === topicName && fact.subtopic === subtopicName)
     .at(-1) || null;
 }
@@ -161,9 +170,20 @@ function normalizeFactLog(payload = {}) {
         audioUrl: fact.audioUrl ? String(fact.audioUrl) : null,
         archivePath: fact.archivePath ? String(fact.archivePath) : null,
         voiceId: fact.voiceId ? String(fact.voiceId) : null,
+        hostId: normalizeHostId(fact.hostId),
+        hostName: fact.hostName ? String(fact.hostName) : null,
       }))
       .filter((fact) => fact.topic && fact.text),
   };
+}
+
+function normalizeHostId(value) {
+  return String(value || DEFAULT_HOST_ID)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48) || DEFAULT_HOST_ID;
 }
 
 function normalizeCursor(cursor = {}) {

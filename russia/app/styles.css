@@ -913,6 +913,7 @@ input[type="range"] {
 
 .admin-app input[type="text"],
 .admin-app input[type="number"],
+.admin-app select,
 .admin-app textarea,
 .admin-dashboard input[type="text"],
 .admin-dashboard textarea,
@@ -931,6 +932,7 @@ input[type="range"] {
 
 .admin-app input[type="text"]:focus,
 .admin-app input[type="number"]:focus,
+.admin-app select:focus,
 .admin-app textarea:focus,
 .admin-dashboard input[type="text"]:focus,
 .admin-dashboard textarea:focus,
@@ -957,8 +959,9 @@ input[type="range"] {
 }
 
 .prompt-grid label:nth-child(1),
-.prompt-grid label:nth-child(3),
-.prompt-grid label:nth-child(4) {
+.prompt-grid label:nth-child(2),
+.prompt-grid label:nth-child(6),
+.prompt-grid label:nth-child(7) {
   grid-column: 1 / -1;
 }
 

@@ -1,6 +1,23 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
+const DEFAULT_HOST_ID = "sweetiefox";
+const promptKinds = ["greeting", "fact", "listener", "farewell"];
+
+const defaultPromptConfig = {
+  common: "Общие правила для всех ведущих AI Chill Radio. Пиши только готовый текст для озвучки, без markdown, списков, кавычек, эмодзи и технических комментариев. Все числа, годы, проценты, единицы измерения и сокращения произноси словами: не 30-40 секунд, а от тридцати до сорока секунд; не 3D, а три-дэ; не AI, а эй-ай, если это должно звучать именно так. Для естественной речи используй короткие фразы, живую пунктуацию и редкие паузы ElevenLabs в формате <break time=\"0.35s\" /> или <break time=\"0.55s\" />; не ставь паузы подряд и не делай их длиннее одной секунды. Для русского текста не используй SSML phoneme: он не подходит для нашей русской озвучки. Если слово может быть прочитано неверно, переформулируй его или поставь явное ударение в слове. Интонация должна быть спокойной, уверенной, теплой и радиоформатной: не лекция, не реклама и не сухая энциклопедия.",
+  activeHostId: DEFAULT_HOST_ID,
+  hosts: {
+    [DEFAULT_HOST_ID]: {
+      name: "SweetieFox",
+      greeting: "Сделай уникальное приветствие для chill radio от ведущей SweetieFox. Атмосфера: спокойная музыка, интересные темы, мягкая улыбка и ощущение живого эфира. Два коротких предложения.",
+      farewell: "Сделай уникальное прощание для chill radio от ведущей SweetieFox. Теплый финал эфира, спокойная улыбка, приглашение вернуться. Одно или два коротких предложения.",
+      fact: "Сделай эфирный монолог на тридцать-сорок секунд по главной теме и обязательной подтеме. В первой фразе естественно объяви, к какой теме и подтеме перешел эфир, но каждый раз формулируй это по-новому. Дальше раскрой один конкретный механизм, пример, число или историю: подробно, понятно, без воды, без общих фраз и без ухода в соседние подтемы. Длина примерно семьдесят пять-девяносто пять слов. Стиль: спокойное умное chill radio, живая речь ведущей, без списков.",
+      listener: "Ответь слушателю как ведущая SweetieFox: спокойно, женственно, мягко, с паузами и без спешки. Делай подробный эфирный ответ, но держи структуру живой радиоречи. Сначала коротко озвучь вопрос, затем ответь по сути.",
+    },
+  },
+};
+
 const defaultTopicTree = [
   ["космос", ["Марс", "Венера", "Юпитер", "Сатурн", "чёрные дыры", "экзопланеты", "кометы", "Луна", "звёзды", "космические миссии"]],
   ["океан", ["глубоководные рыбы", "кораллы", "киты", "течения", "биолюминесценция", "подводные вулканы", "солёность", "планктон", "Марианская впадина", "кораблекрушения"]],
@@ -50,12 +67,7 @@ const curatedTopicTree = [
 const defaultAdminConfig = {
   stationName: "AI Chill Radio",
   topics: curatedTopicTree.map(([name, subtopics]) => ({ name, subtopics })),
-  prompts: {
-    greeting: "Сделай уникальное весёлое приветствие для chill radio. Атмосфера: спокойная музыка, интересные факты, лёгкая улыбка. 2 коротких предложения, без эмодзи и кавычек.",
-    farewell: "Сделай уникальное весёлое прощание для chill radio. Тёплый финал эфира, спокойная улыбка, приглашение вернуться. 1-2 коротких предложения, без эмодзи и кавычек.",
-    fact: "Сделай эфирный монолог на 30-40 секунд по главной теме и обязательной подтеме. В первой фразе естественно объяви, к какой теме и подтеме перешел эфир, но каждый раз формулируй это по-новому. Дальше раскрой один конкретный механизм, пример, число или историю: подробно, понятно, без воды, без общих фраз и без ухода в соседние подтемы. Длина примерно 75-95 слов. Стиль: спокойное умное chill radio, живая речь диктора, без списков, markdown, эмодзи и кавычек.",
-    announcement: "Сделай короткую мягкую подводку к следующему треку для chill radio. 1 предложение, без эмодзи и кавычек.",
-  },
+  prompts: defaultPromptConfig,
   voice: {
     stability: 0.5,
     similarityBoost: 0.75,
@@ -77,8 +89,6 @@ const defaultAdminConfig = {
     maxIntervalMinutes: 6,
   },
 };
-
-defaultAdminConfig.prompts.listener = "Ответь слушателю как диктор chill radio Sweetie Fox: спокойно, женственно, мягко, с паузами и без спешки. Делай подробный эфирный ответ, но держи структуру живой радиоречи.";
 
 async function readAdminConfig(config) {
   await ensureAdminConfig(config);
@@ -106,13 +116,7 @@ function mergeAdminConfig(input = {}) {
   return {
     stationName: String(input.stationName || defaultAdminConfig.stationName).slice(0, 80),
     topics: normalizeTopicTree(input.topics),
-    prompts: {
-      greeting: normalizePrompt(input.prompts?.greeting, defaultAdminConfig.prompts.greeting),
-      farewell: normalizePrompt(input.prompts?.farewell, defaultAdminConfig.prompts.farewell),
-      fact: normalizePrompt(input.prompts?.fact, defaultAdminConfig.prompts.fact),
-      listener: normalizePrompt(input.prompts?.listener, defaultAdminConfig.prompts.listener),
-      announcement: normalizePrompt(input.prompts?.announcement, defaultAdminConfig.prompts.announcement),
-    },
+    prompts: normalizePromptConfig(input.prompts),
     voice: {
       stability: clampNumber(input.voice?.stability, defaultAdminConfig.voice.stability, 0, 1),
       similarityBoost: clampNumber(input.voice?.similarityBoost, defaultAdminConfig.voice.similarityBoost, 0, 1),
@@ -169,10 +173,67 @@ function normalizePrompt(value, fallback) {
   return prompt.slice(0, 5000);
 }
 
+function normalizePromptConfig(value = {}) {
+  const input = value && typeof value === "object" ? value : {};
+  const defaultHost = defaultPromptConfig.hosts[DEFAULT_HOST_ID];
+  const sourceHosts = input.hosts && typeof input.hosts === "object" ? input.hosts : {};
+  const legacyHost = {
+    name: input.hostName || defaultHost.name,
+    greeting: input.greeting,
+    fact: input.fact,
+    listener: input.listener,
+    farewell: input.farewell,
+  };
+  const hostIds = new Set([DEFAULT_HOST_ID, ...Object.keys(sourceHosts)]);
+  const hosts = {};
+
+  for (const rawId of hostIds) {
+    const hostId = normalizeHostId(rawId) || DEFAULT_HOST_ID;
+    const source = sourceHosts[rawId] || (hostId === DEFAULT_HOST_ID ? legacyHost : {});
+    const fallback = hostId === DEFAULT_HOST_ID ? defaultHost : legacyHost;
+    hosts[hostId] = {
+      name: String(source?.name || fallback.name || hostId).trim().slice(0, 80),
+      greeting: normalizePrompt(source?.greeting, fallback.greeting || defaultHost.greeting),
+      fact: normalizePrompt(source?.fact, fallback.fact || defaultHost.fact),
+      listener: normalizePrompt(source?.listener, fallback.listener || defaultHost.listener),
+      farewell: normalizePrompt(source?.farewell, fallback.farewell || defaultHost.farewell),
+    };
+  }
+
+  const requestedHostId = normalizeHostId(input.activeHostId) || DEFAULT_HOST_ID;
+  const activeHostId = hosts[requestedHostId] ? requestedHostId : DEFAULT_HOST_ID;
+  return {
+    common: normalizePrompt(input.common, defaultPromptConfig.common),
+    activeHostId,
+    hosts,
+  };
+}
+
+function getActivePromptSet(admin = {}) {
+  const prompts = normalizePromptConfig(admin.prompts);
+  const hostId = prompts.activeHostId;
+  const host = prompts.hosts[hostId] || prompts.hosts[DEFAULT_HOST_ID];
+  return {
+    common: prompts.common,
+    hostId,
+    hostName: host.name || hostId,
+    ...Object.fromEntries(promptKinds.map((key) => [key, host[key]])),
+  };
+}
+
+function normalizeHostId(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
+}
+
 function clampNumber(value, fallback, min, max) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
   return Math.min(Math.max(number, min), max);
 }
 
-module.exports = { defaultAdminConfig, readAdminConfig, writeAdminConfig };
+module.exports = { DEFAULT_HOST_ID, defaultAdminConfig, getActivePromptSet, readAdminConfig, writeAdminConfig };

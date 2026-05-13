@@ -1,27 +1,11 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { fallbackScript, generateFact, generateFarewell, generateGreeting, generateListenerAnswer, generateScript } = require("./deepseek");
+const { generateFact, generateFarewell, generateGreeting, generateListenerAnswer } = require("./deepseek");
 const { synthesize } = require("./elevenlabs");
-const { readAdminConfig } = require("../adminStore");
+const { getActivePromptSet, readAdminConfig } = require("../adminStore");
 const { addFactLogEntry, advanceCursor, getArchivedFactForSelection, getRecentFacts, readAvailableFactLog } = require("../factLog");
 
 let factQueue = Promise.resolve();
-
-async function createAnnouncement(config, input) {
-  const admin = await readAdminConfig(config);
-  const trackTitle = String(input?.trackTitle || "следующий трек").slice(0, 160);
-  const text = await generateScript(config.deepseek, trackTitle, input, admin).catch((error) => {
-    console.warn(`DeepSeek fallback: ${error.message}`);
-    return fallbackScript(trackTitle);
-  });
-
-  const audio = await synthesize(config.elevenlabs, config.cacheDir, text, { kind: "announcement", voice: admin.voice }).catch((error) => {
-    console.warn(`ElevenLabs fallback: ${error.message}`);
-    return null;
-  });
-
-  return { text, audioUrl: audio?.audioUrl || null };
-}
 
 async function createGreeting(config) {
   const admin = await readAdminConfig(config);
@@ -59,6 +43,7 @@ async function createFact(config, input = {}) {
 
 async function createFactUnlocked(config, input = {}) {
   const admin = await readAdminConfig(config);
+  const promptSet = getActivePromptSet(admin);
   const log = await readAvailableFactLog(config, { prune: true });
   const selection = input.topic && input.subtopic
     ? resolveRequestedSelection(admin, input)
@@ -66,7 +51,7 @@ async function createFactUnlocked(config, input = {}) {
   const topicName = selection.topic.name;
   const subtopicName = selection.subtopic;
 
-  const archived = getArchivedFactForSelection(log, config.elevenlabs.voiceId, topicName, subtopicName);
+  const archived = getArchivedFactForSelection(log, config.elevenlabs.voiceId, topicName, subtopicName, promptSet.hostId);
   if (archived && !input.forceGenerate) {
     return {
       text: archived.text,
@@ -93,6 +78,8 @@ async function createFactUnlocked(config, input = {}) {
 
   const payload = await createArchivedVoice(config, {
     kind: "facts",
+    hostId: promptSet.hostId,
+    hostName: promptSet.hostName,
     topic: topicName,
     topicIndex: selection.topicIndex,
     subtopic: subtopicName,
@@ -123,6 +110,7 @@ async function createListenerQuestion(config, input) {
 
 async function createArchivedVoice(config, item) {
   const admin = await readAdminConfig(config);
+  const promptSet = getActivePromptSet(admin);
   const archive = getArchivePaths(config, item);
   const uniqueKind = `${item.kind}:${item.topic || item.theme}:${item.subtopic || ""}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
   let audio = null;
@@ -153,6 +141,8 @@ async function createArchivedVoice(config, item) {
     userName: item.userName,
     question: item.question,
     voiceId: config.elevenlabs.voiceId,
+    hostId: item.hostId || promptSet.hostId,
+    hostName: item.hostName || promptSet.hostName,
     audioError,
   };
 
@@ -214,4 +204,4 @@ function sanitizeSlug(value) {
     .replace(/^-+|-+$/g, "");
 }
 
-module.exports = { createAnnouncement, createFact, createFarewell, createGreeting, createListenerQuestion };
+module.exports = { createFact, createFarewell, createGreeting, createListenerQuestion };

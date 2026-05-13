@@ -1,10 +1,12 @@
 const statusEl = document.querySelector("#adminStatus");
 const stationNameInput = document.querySelector("#stationNameInput");
+const commonPrompt = document.querySelector("#commonPrompt");
+const activeHostSelect = document.querySelector("#activeHostSelect");
+const hostNameInput = document.querySelector("#hostNameInput");
 const greetingPrompt = document.querySelector("#greetingPrompt");
 const factPrompt = document.querySelector("#factPrompt");
 const listenerPrompt = document.querySelector("#listenerPrompt");
 const farewellPrompt = document.querySelector("#farewellPrompt");
-const announcementPrompt = document.querySelector("#announcementPrompt");
 const saveButton = document.querySelector("#saveButton");
 const refreshPromptsButton = document.querySelector("#refreshPromptsButton");
 const testGreetingButton = document.querySelector("#testGreetingButton");
@@ -31,9 +33,7 @@ const listenerList = document.querySelector("#listenerList");
 const queueGreetingButton = document.querySelector("#queueGreetingButton");
 const queueFactButton = document.querySelector("#queueFactButton");
 const queueFarewellButton = document.querySelector("#queueFarewellButton");
-const queueAnnouncementButton = document.querySelector("#queueAnnouncementButton");
 const queueSelectedTopicButton = document.querySelector("#queueSelectedTopicButton");
-const announcementTrackTitle = document.querySelector("#announcementTrackTitle");
 
 const voiceInputs = {
   stability: document.querySelector("#stability"),
@@ -80,9 +80,6 @@ resetListenersButton?.addEventListener("click", resetListeners);
 queueGreetingButton?.addEventListener("click", () => enqueueBroadcastAction("/api/greeting", queueGreetingButton, "Приветствие"));
 queueFactButton?.addEventListener("click", () => enqueueBroadcastAction("/api/fact", queueFactButton, "Следующая тема"));
 queueFarewellButton?.addEventListener("click", () => enqueueBroadcastAction("/api/farewell", queueFarewellButton, "Прощание"));
-queueAnnouncementButton?.addEventListener("click", () => enqueueBroadcastAction("/api/announcement", queueAnnouncementButton, "Подводка", {
-  trackTitle: announcementTrackTitle?.value || "",
-}));
 queueSelectedTopicButton?.addEventListener("click", queueSelectedTopic);
 startTopicCycleButton?.addEventListener("click", startTopicCycle);
 stopTopicCycleButton?.addEventListener("click", stopTopicCycle);
@@ -91,6 +88,11 @@ testFactButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/fact
 addTopicButton?.addEventListener("click", addTopic);
 addSubtopicButton?.addEventListener("click", addSubtopic);
 deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
+activeHostSelect?.addEventListener("change", () => {
+  if (!currentConfig?.prompts) return;
+  currentConfig.prompts.activeHostId = getActiveHostId();
+  renderConfig(currentConfig);
+});
 topicNameInput?.addEventListener("input", () => {
   if (!currentConfig?.topics[selectedTopicIndex]) return;
   currentConfig.topics[selectedTopicIndex].name = topicNameInput.value;
@@ -126,11 +128,14 @@ async function loadConfig() {
 
 function renderConfig(config) {
   stationNameInput.value = config.stationName;
-  greetingPrompt.value = config.prompts.greeting;
-  factPrompt.value = config.prompts.fact;
-  listenerPrompt.value = config.prompts.listener || "";
-  farewellPrompt.value = config.prompts.farewell;
-  announcementPrompt.value = config.prompts.announcement;
+  const host = getActiveHost(config);
+  commonPrompt.value = config.prompts.common || "";
+  renderHostSelect(config);
+  hostNameInput.value = host.name || "";
+  greetingPrompt.value = host.greeting || "";
+  factPrompt.value = host.fact || "";
+  listenerPrompt.value = host.listener || "";
+  farewellPrompt.value = host.farewell || "";
 
   voiceInputs.stability.value = config.voice.stability;
   voiceInputs.similarityBoost.value = config.voice.similarityBoost;
@@ -173,6 +178,30 @@ function renderTopicList() {
     });
     topicList.append(button);
   });
+}
+
+function renderHostSelect(config) {
+  if (!activeHostSelect) return;
+  const hosts = config.prompts?.hosts || {};
+  const activeHostId = config.prompts?.activeHostId || Object.keys(hosts)[0] || "sweetiefox";
+  activeHostSelect.innerHTML = "";
+  for (const [hostId, host] of Object.entries(hosts)) {
+    const option = document.createElement("option");
+    option.value = hostId;
+    option.textContent = host.name || hostId;
+    option.selected = hostId === activeHostId;
+    activeHostSelect.append(option);
+  }
+}
+
+function getActiveHost(config = currentConfig) {
+  const hosts = config?.prompts?.hosts || {};
+  const hostId = config?.prompts?.activeHostId || Object.keys(hosts)[0] || "sweetiefox";
+  return hosts[hostId] || hosts.sweetiefox || {};
+}
+
+function getActiveHostId() {
+  return activeHostSelect?.value || currentConfig?.prompts?.activeHostId || "sweetiefox";
 }
 
 function renderTopicDetail() {
@@ -294,8 +323,11 @@ async function saveConfig() {
 }
 
 async function refreshPrompts() {
+  const confirmed = window.confirm("Обновить промпты ведущего и общий промпт? Сохраненные mp3 останутся в архиве. Новые правила применятся к следующим генерациям, а уже сохраненные подтемы будут воспроизводиться из архива, пока ты их не удалишь.");
+  if (!confirmed) return;
+
   refreshPromptsButton.disabled = true;
-  setStatus("Обновляю промпты и сбрасываю очередь фактов");
+  setStatus("Обновляю промпты");
 
   try {
     const response = await fetch("/api/admin/prompts/refresh", {
@@ -307,10 +339,9 @@ async function refreshPrompts() {
     if (!response.ok) throw new Error(payload.error || "Prompt refresh failed");
 
     currentConfig = payload.admin;
-    factLog = { cursor: { topicIndex: 0, subtopicIndex: 0 }, facts: [] };
     renderConfig(currentConfig);
     await Promise.all([refreshFactLog(), refreshArchive()]);
-    setStatus("Промпты обновлены. Архив не удален, очередь фактов сброшена.");
+    setStatus("Промпты обновлены. Архив и отметки сохраненных mp3 не удалены.");
   } catch (error) {
     setStatus(`Не удалось обновить промпты: ${error.message}`);
   } finally {
@@ -326,11 +357,20 @@ function collectConfig() {
       subtopics: topic.subtopics.map((item) => item.trim()).filter(Boolean),
     })).filter((topic) => topic.name && topic.subtopics.length),
     prompts: {
-      greeting: greetingPrompt.value,
-      fact: factPrompt.value,
-      listener: listenerPrompt.value,
-      farewell: farewellPrompt.value,
-      announcement: announcementPrompt.value,
+      ...currentConfig.prompts,
+      common: commonPrompt.value,
+      activeHostId: getActiveHostId(),
+      hosts: {
+        ...(currentConfig.prompts?.hosts || {}),
+        [getActiveHostId()]: {
+          ...getActiveHost(currentConfig),
+          name: hostNameInput.value,
+          greeting: greetingPrompt.value,
+          fact: factPrompt.value,
+          listener: listenerPrompt.value,
+          farewell: farewellPrompt.value,
+        },
+      },
     },
     voice: {
       stability: Number(voiceInputs.stability.value),
@@ -426,7 +466,7 @@ async function startTopicCycle() {
     topicCycle = await response.json();
     if (!response.ok) throw new Error(topicCycle.error || "Не удалось запустить автоэфир");
     renderTopicCycleStatus();
-    setStatus("Автоэфир тем запущен: диктор будет выходить каждые 5-6 минут");
+    setStatus(`Автоэфир тем запущен: диктор будет выходить каждые ${topicCycleMinInput.value}-${topicCycleMaxInput.value} минут`);
   } catch (error) {
     setStatus(`Автоэфир тем: ошибка - ${error.message}`);
   } finally {
@@ -666,7 +706,10 @@ function getVoicedSets() {
   const subtopics = new Set();
   const savedSubtopics = new Set();
   const topics = new Set();
+  const activeHostId = getActiveHostId();
   for (const fact of factLog.facts || []) {
+    const factHostId = fact.hostId || "sweetiefox";
+    if (factHostId !== activeHostId) continue;
     if (fact.topic) topics.add(fact.topic);
     if (fact.topic && fact.subtopic) subtopics.add(getPairKey(fact.topic, fact.subtopic));
     if (fact.topic && fact.subtopic && fact.audioUrl) savedSubtopics.add(getPairKey(fact.topic, fact.subtopic));

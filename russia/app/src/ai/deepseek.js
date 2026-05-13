@@ -1,19 +1,5 @@
 const { fetchJson } = require("../http");
-
-async function generateScript(config, trackTitle, input, admin) {
-  if (!config.apiKey) return fallbackScript(trackTitle);
-
-  const position = Number(input?.position || 1);
-  const total = Number(input?.total || 1);
-  return chat(config, {
-    temperature: 0.9,
-    maxTokens: 110,
-    maxChars: 620,
-    system: "Ты русскоязычный диктор chill radio. Пиши только текст для эфира, без кавычек, эмодзи, списков и технических пометок.",
-    user: `${admin.prompts.announcement}\nТрек: ${trackTitle}. Позиция: ${position} из ${total}.`,
-    fallback: fallbackScript(trackTitle),
-  });
-}
+const { getActivePromptSet } = require("../adminStore");
 
 async function generateGreeting(config, admin) {
   if (!config.apiKey) {
@@ -25,7 +11,7 @@ async function generateGreeting(config, admin) {
     maxTokens: 130,
     maxChars: 900,
     system: "Ты весёлый русскоязычный диктор chill radio. Каждый ответ должен быть новым, лёгким и живым. Без кавычек, эмодзи, списков и технических пометок.",
-    user: `${admin.prompts.greeting}\nНазвание станции: ${admin.stationName}. Сделай новую версию, не повторяй прошлые формулировки.`,
+    user: buildPrompt(admin, "greeting", `Название станции: ${admin.stationName}. Сделай новую версию, не повторяй прошлые формулировки.`),
     fallback: "Добро пожаловать на AI Chill Radio. Сегодня ловим мягкий вайб, странные факты и музыку без лишней суеты.",
   });
 }
@@ -40,7 +26,7 @@ async function generateFarewell(config, admin) {
     maxTokens: 120,
     maxChars: 900,
     system: "Ты весёлый русскоязычный диктор chill radio. Прощание должно быть новым, тёплым и немного игривым. Без кавычек, эмодзи, списков и технических пометок.",
-    user: `${admin.prompts.farewell}\nНазвание станции: ${admin.stationName}. Сделай новую версию, не повторяй прошлые формулировки.`,
+    user: buildPrompt(admin, "farewell", `Название станции: ${admin.stationName}. Сделай новую версию, не повторяй прошлые формулировки.`),
     fallback: "Спасибо, что были на волне AI Chill Radio. Уходите мягко, возвращайтесь с улыбкой.",
   });
 }
@@ -62,7 +48,7 @@ async function generateFact(config, topic, subtopic, admin, recentFacts = [], co
     maxTokens: 1200,
     maxChars: 5200,
     system: "Ты редактор и диктор AI chill radio. Делай эфирный монолог на 30-40 секунд: подробно, понятно, без воды и без канцелярита. Каждый выпуск раскрывает одну подтему внутри главной темы. Нельзя повторять объект, пример, число или сюжет из списка запретов. Без списков, markdown, кавычек, эмодзи и технических пометок.",
-    user: `${admin.prompts.fact}\nГлавная тема: ${topic}.\nПодтема: ${subtopic}.\nЭто обязательная подтема выпуска, не уходи в соседние подтемы.${topicIntro}${avoid}\nВыдай только готовый текст диктора для эфира.`,
+    user: buildPrompt(admin, "fact", `Главная тема: ${topic}.\nПодтема: ${subtopic}.\nЭто обязательная подтема выпуска, не уходи в соседние подтемы.${topicIntro}${avoid}\nВыдай только готовый текст диктора для эфира.`),
     fallback: `Факт на тему ${topic}, ${subtopic}: иногда самые спокойные наблюдения оказываются самыми запоминающимися.`,
   });
 }
@@ -72,16 +58,26 @@ async function generateListenerAnswer(config, userName, question, admin) {
     return `${userName} прислал вопрос: ${question}. <break time=0.45s /> Интересный повод притормозить и посмотреть на тему внимательнее. Даже если вопрос звучит случайно, в нем можно найти маленькую дверь к любопытному факту.`;
   }
 
-  const prompt = admin.prompts.listener || admin.prompts.fact;
+  const promptSet = getActivePromptSet(admin);
+  const prompt = promptSet.listener || promptSet.fact;
   const text = await chat(config, {
     temperature: 0.9,
     maxTokens: 1200,
     maxChars: 7000,
     system: "Ты диктор AI Chill Radio, женская спокойная подача Sweetie Fox. Главная инструкция по стилю, длине и структуре находится в промпте администратора. Если промпт администратора задает количество предложений, строго соблюдай его. Не добавляй другую длину от себя. Без markdown, списков, кавычек и эмодзи.",
-    user: `Промпт администратора, он главный:\n${admin.prompts.listener || admin.prompts.fact}\n\nКонтекст эфира:\nСлушатель: ${userName}.\nВопрос слушателя: ${question}.\n\nСформируй ответ для живого эфира. Начни с обращения: ${userName} прислал такой вопрос. Затем коротко озвучь вопрос и ответь по сути. Если в промпте администратора разрешены паузы, используй <break time=0.35s /> или <break time=0.55s /> только там, где это естественно. Не превышай длину, указанную в промпте администратора.`,
+    user: buildPrompt(admin, "listener", `Контекст эфира:\nСлушатель: ${userName}.\nВопрос слушателя: ${question}.\n\nСформируй ответ для живого эфира. Начни с обращения: ${userName} прислал такой вопрос. Затем коротко озвучь вопрос и ответь по сути. Если в промпте администратора разрешены паузы, используй <break time=0.35s /> или <break time=0.55s /> только там, где это естественно. Не превышай длину, указанную в промпте администратора.`),
     fallback: `${userName} прислал вопрос: ${question}. <break time=0.45s /> Интересный повод притормозить и посмотреть на тему внимательнее.`,
   });
   return limitByPromptSentenceCount(text, prompt);
+}
+
+function buildPrompt(admin, kind, context) {
+  const promptSet = getActivePromptSet(admin);
+  return [
+    `Общий промпт для всех ведущих:\n${promptSet.common}`,
+    `Индивидуальный промпт ведущего ${promptSet.hostName}:\n${promptSet[kind] || promptSet.fact}`,
+    context,
+  ].filter(Boolean).join("\n\n");
 }
 
 async function pingDeepSeek(config) {
@@ -146,10 +142,6 @@ async function chat(config, options) {
   return sanitizeAnnouncement(payload.choices?.[0]?.message?.content, options.maxChars) || options.fallback;
 }
 
-function fallbackScript(trackTitle) {
-  return `Остаёмся на спокойной волне. Дальше в эфире ${trackTitle}.`;
-}
-
 function sanitizeAnnouncement(text, maxChars = 620) {
   return String(text || "")
     .replace(/^["'«»\s]+|["'«»\s]+$/g, "")
@@ -207,4 +199,4 @@ function restoreBreakTags(text, tags) {
   return text.replace(/__BREAK_(\d+)__/g, (_, index) => tags[Number(index)] || "");
 }
 
-module.exports = { fallbackScript, generateFact, generateFarewell, generateGreeting, generateListenerAnswer, generateScript, pingDeepSeek, sanitizeAnnouncement };
+module.exports = { generateFact, generateFarewell, generateGreeting, generateListenerAnswer, pingDeepSeek, sanitizeAnnouncement };

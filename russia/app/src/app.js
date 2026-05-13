@@ -4,7 +4,7 @@ const dns = require("node:dns").promises;
 const fs = require("node:fs");
 const path = require("node:path");
 const { URL } = require("node:url");
-const { createAnnouncement, createFact, createFarewell, createGreeting, createListenerQuestion } = require("./ai/announcer");
+const { createFact, createFarewell, createGreeting, createListenerQuestion } = require("./ai/announcer");
 const { pingDeepSeek } = require("./ai/deepseek");
 const { pingElevenLabs } = require("./ai/elevenlabs");
 const { readAdminConfig, writeAdminConfig } = require("./adminStore");
@@ -299,10 +299,9 @@ function createServer(config) {
       if (request.method === "POST" && url.pathname === "/api/admin/prompts/refresh") {
         const body = await readJson(request);
         const admin = await writeAdminConfig(config, body);
-        await resetFactLog(config);
         await emitAdmin(config, "config", admin);
         await emitFactState(config);
-        await sendJson(response, 200, { admin, reset: true });
+        await sendJson(response, 200, { admin, reset: false });
         return;
       }
 
@@ -348,14 +347,6 @@ function createServer(config) {
           pingElevenLabs(config.elevenlabs),
         ]);
         await sendJson(response, deepseek.ok && elevenlabs.ok ? 200 : 207, { deepseek, elevenlabs });
-        return;
-      }
-
-      if (request.method === "POST" && url.pathname === "/api/announcement") {
-        const body = await readJson(request);
-        const payload = await createAnnouncement(config, body);
-        const event = { ...payload, title: "Подводка к треку", source: "admin" };
-        await sendGeneratedVoice(response, config, broadcast, event, payload);
         return;
       }
 
@@ -765,7 +756,6 @@ function requiresAdmin(pathname) {
     || pathname.startsWith("/api/admin/")
     || pathname.startsWith("/archive/")
     || pathname.startsWith("/cache/announcements/")
-    || pathname === "/api/announcement"
     || pathname === "/api/greeting"
     || pathname === "/api/fact"
     || pathname === "/api/farewell";
