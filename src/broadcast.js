@@ -929,18 +929,22 @@ class BroadcastStream {
   async streamVoiceSegment(tracks, item, options = {}) {
     const admin = await readAdminConfig(this.config);
     const voiceDuration = await this.probeDuration(item.voicePath);
-    const preludeSeconds = Math.max(0, Number(options.preludeSeconds) || 0);
-    const postludeSeconds = Math.max(0, Number(options.postludeSeconds) || 0);
-    const duckFadeSeconds = 1.6;
-    const restoreFadeSeconds = 1.4;
+    const preludeSeconds = Number.isFinite(item.preludeSeconds)
+      ? Math.max(0, Number(item.preludeSeconds))
+      : Math.max(0, Number(admin.audioMix?.preludeSeconds ?? options.preludeSeconds) || 0);
+    const postludeSeconds = Number.isFinite(item.postludeSeconds)
+      ? Math.max(0, Number(item.postludeSeconds))
+      : Math.max(0, Number(admin.audioMix?.postludeSeconds ?? options.postludeSeconds) || 0);
+    const duckFadeSeconds = Math.max(0.2, Number(admin.audioMix?.duckFadeSeconds ?? 1.6) || 1.6);
+    const restoreFadeSeconds = Math.max(0.2, Number(admin.audioMix?.restoreFadeSeconds ?? 1.4) || 1.4);
     const duckStart = preludeSeconds;
     const voiceStart = duckStart + duckFadeSeconds;
     const voiceEnd = voiceStart + voiceDuration + 0.35;
     const totalDuration = Math.max(4, voiceEnd + restoreFadeSeconds + postludeSeconds + 0.9);
     const musicBedSegments = await this.buildMusicBedSegments(tracks, totalDuration);
     this.setCurrentMusicBed(musicBedSegments);
-    const normalMusic = clamp(admin.audioMix?.musicLevel ?? 0.72);
-    const voiceLevel = clamp(admin.audioMix?.voiceLevel ?? 1);
+    const normalMusic = clampGain(admin.audioMix?.musicLevel ?? 0.72);
+    const voiceLevel = clampGain(admin.audioMix?.voiceLevel ?? 1);
     const voiceGain = clampGain(voiceLevel * 2.4);
     const duckMusic = clamp(normalMusic * (admin.audioMix?.duckingRatio ?? 0.18));
     const volumeExpr = [

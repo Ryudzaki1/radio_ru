@@ -69,6 +69,7 @@ const defaultAdminConfig = {
   topics: curatedTopicTree.map(([name, subtopics]) => ({ name, subtopics })),
   prompts: defaultPromptConfig,
   voice: {
+    model: "eleven_multilingual_v2",
     stability: 0.5,
     similarityBoost: 0.75,
     style: 0,
@@ -79,6 +80,10 @@ const defaultAdminConfig = {
     musicLevel: 0.72,
     voiceLevel: 1,
     duckingRatio: 0.18,
+    preludeSeconds: 0,
+    duckFadeSeconds: 1.6,
+    restoreFadeSeconds: 1.4,
+    postludeSeconds: 3,
   },
   factPolicy: {
     archiveAfterTotal: 200,
@@ -118,6 +123,7 @@ function mergeAdminConfig(input = {}) {
     topics: normalizeTopicTree(input.topics),
     prompts: normalizePromptConfig(input.prompts),
     voice: {
+      model: normalizeVoiceModel(input.voice?.model, defaultAdminConfig.voice.model),
       stability: clampNumber(input.voice?.stability, defaultAdminConfig.voice.stability, 0, 1),
       similarityBoost: clampNumber(input.voice?.similarityBoost, defaultAdminConfig.voice.similarityBoost, 0, 1),
       style: clampNumber(input.voice?.style, defaultAdminConfig.voice.style, 0, 1),
@@ -125,9 +131,13 @@ function mergeAdminConfig(input = {}) {
       speakerBoost: Boolean(input.voice?.speakerBoost ?? defaultAdminConfig.voice.speakerBoost),
     },
     audioMix: {
-      musicLevel: clampNumber(input.audioMix?.musicLevel, defaultAdminConfig.audioMix.musicLevel, 0, 1),
-      voiceLevel: clampNumber(input.audioMix?.voiceLevel, defaultAdminConfig.audioMix.voiceLevel, 0, 1),
+      musicLevel: clampNumber(input.audioMix?.musicLevel, defaultAdminConfig.audioMix.musicLevel, 0, 2),
+      voiceLevel: clampNumber(input.audioMix?.voiceLevel, defaultAdminConfig.audioMix.voiceLevel, 0, 2),
       duckingRatio: clampNumber(input.audioMix?.duckingRatio, defaultAdminConfig.audioMix.duckingRatio, 0, 1),
+      preludeSeconds: clampNumber(input.audioMix?.preludeSeconds, defaultAdminConfig.audioMix.preludeSeconds, 0, 30),
+      duckFadeSeconds: clampNumber(input.audioMix?.duckFadeSeconds, defaultAdminConfig.audioMix.duckFadeSeconds, 0.2, 10),
+      restoreFadeSeconds: clampNumber(input.audioMix?.restoreFadeSeconds, defaultAdminConfig.audioMix.restoreFadeSeconds, 0.2, 10),
+      postludeSeconds: clampNumber(input.audioMix?.postludeSeconds, defaultAdminConfig.audioMix.postludeSeconds, 0, 30),
     },
     factPolicy: {
       archiveAfterTotal: Math.round(clampNumber(input.factPolicy?.archiveAfterTotal, defaultAdminConfig.factPolicy.archiveAfterTotal, 10, 2000)),
@@ -228,6 +238,14 @@ function normalizeHostId(value) {
     .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
+}
+
+function normalizeVoiceModel(value, fallback) {
+  const model = String(value || fallback || "").trim();
+  return [
+    "eleven_multilingual_v2",
+    "eleven_flash_v2_5",
+  ].includes(model) ? model : fallback;
 }
 
 function clampNumber(value, fallback, min, max) {

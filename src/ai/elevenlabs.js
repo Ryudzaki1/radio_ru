@@ -36,7 +36,7 @@ async function synthesizeUnlocked(config, outputDir, text, options = {}) {
     },
     body: JSON.stringify({
       text: prepareTextForSpeech(text),
-      model_id: config.model,
+      model_id: options.voice?.model || config.model,
       language_code: "ru",
       voice_settings: getVoiceSettings(options.voice),
     }),

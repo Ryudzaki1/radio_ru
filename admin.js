@@ -8,6 +8,9 @@ const factPrompt = document.querySelector("#factPrompt");
 const listenerPrompt = document.querySelector("#listenerPrompt");
 const farewellPrompt = document.querySelector("#farewellPrompt");
 const saveButton = document.querySelector("#saveButton");
+const voiceMusicLockButton = document.querySelector("#voiceMusicLockButton");
+const voiceMusicLockStatus = document.querySelector("#voiceMusicLockStatus");
+const voiceHostSelect = document.querySelector("#voiceHostSelect");
 const refreshPromptsButton = document.querySelector("#refreshPromptsButton");
 const testGreetingButton = document.querySelector("#testGreetingButton");
 const testFactButton = document.querySelector("#testFactButton");
@@ -36,6 +39,7 @@ const queueFarewellButton = document.querySelector("#queueFarewellButton");
 const queueSelectedTopicButton = document.querySelector("#queueSelectedTopicButton");
 
 const voiceInputs = {
+  model: document.querySelector("#voiceModel"),
   stability: document.querySelector("#stability"),
   similarityBoost: document.querySelector("#similarityBoost"),
   style: document.querySelector("#style"),
@@ -43,15 +47,14 @@ const voiceInputs = {
   speakerBoost: document.querySelector("#speakerBoost"),
 };
 
-const factPolicyInputs = {
-  archiveAfterTotal: document.querySelector("#archiveAfterTotal"),
-  useArchiveWhenReady: document.querySelector("#useArchiveWhenReady"),
-};
-
 const audioMixInputs = {
   musicLevel: document.querySelector("#musicLevel"),
   voiceLevel: document.querySelector("#voiceLevel"),
   duckingRatio: document.querySelector("#duckingRatio"),
+  preludeSeconds: document.querySelector("#voicePreludeSeconds"),
+  duckFadeSeconds: document.querySelector("#duckFadeSeconds"),
+  restoreFadeSeconds: document.querySelector("#restoreFadeSeconds"),
+  postludeSeconds: document.querySelector("#voicePostludeSeconds"),
 };
 
 let currentConfig = null;
@@ -61,6 +64,8 @@ let listenerStore = { users: [], questions: [] };
 let topicCycle = { active: false };
 let selectedTopicIndex = 0;
 let adminVoiceQueue = Promise.resolve();
+let voiceMusicUnlocked = false;
+let voiceMusicSnapshot = "";
 
 const adminUiStorage = {
   tab: "ai-radio.adminTab",
@@ -71,7 +76,8 @@ document.querySelectorAll(".admin-tab").forEach((button) => {
   button.addEventListener("click", () => activateTab(button.dataset.tab, { persist: true }));
 });
 
-saveButton?.addEventListener("click", saveConfig);
+saveButton?.addEventListener("click", saveVoiceMusicSettings);
+voiceMusicLockButton?.addEventListener("click", toggleVoiceMusicLock);
 refreshPromptsButton?.addEventListener("click", refreshPrompts);
 refreshArchiveButton?.addEventListener("click", refreshArchive);
 clearArchiveButton?.addEventListener("click", clearArchive);
@@ -92,6 +98,11 @@ activeHostSelect?.addEventListener("change", () => {
   if (!currentConfig?.prompts) return;
   currentConfig.prompts.activeHostId = getActiveHostId();
   renderConfig(currentConfig);
+});
+voiceHostSelect?.addEventListener("change", () => {
+  if (!currentConfig?.prompts) return;
+  currentConfig.prompts.activeHostId = voiceHostSelect.value;
+  if (activeHostSelect) activeHostSelect.value = voiceHostSelect.value;
 });
 topicNameInput?.addEventListener("input", () => {
   if (!currentConfig?.topics[selectedTopicIndex]) return;
@@ -131,24 +142,30 @@ function renderConfig(config) {
   const host = getActiveHost(config);
   commonPrompt.value = config.prompts.common || "";
   renderHostSelect(config);
+  renderVoiceHostSelect(config);
   hostNameInput.value = host.name || "";
   greetingPrompt.value = host.greeting || "";
   factPrompt.value = host.fact || "";
   listenerPrompt.value = host.listener || "";
   farewellPrompt.value = host.farewell || "";
 
+  voiceInputs.model.value = config.voice.model || "eleven_multilingual_v2";
   voiceInputs.stability.value = config.voice.stability;
   voiceInputs.similarityBoost.value = config.voice.similarityBoost;
   voiceInputs.style.value = config.voice.style;
   voiceInputs.speed.value = config.voice.speed;
   voiceInputs.speakerBoost.checked = config.voice.speakerBoost;
-  factPolicyInputs.archiveAfterTotal.value = config.factPolicy.archiveAfterTotal;
-  factPolicyInputs.useArchiveWhenReady.checked = config.factPolicy.useArchiveWhenReady;
   topicCycleMinInput.value = config.topicCycle?.minIntervalMinutes ?? 5;
   topicCycleMaxInput.value = config.topicCycle?.maxIntervalMinutes ?? 6;
   audioMixInputs.musicLevel.value = config.audioMix?.musicLevel ?? 0.72;
   audioMixInputs.voiceLevel.value = config.audioMix?.voiceLevel ?? 1;
   audioMixInputs.duckingRatio.value = config.audioMix?.duckingRatio ?? 0.18;
+  audioMixInputs.preludeSeconds.value = config.audioMix?.preludeSeconds ?? 0;
+  audioMixInputs.duckFadeSeconds.value = config.audioMix?.duckFadeSeconds ?? 1.6;
+  audioMixInputs.restoreFadeSeconds.value = config.audioMix?.restoreFadeSeconds ?? 1.4;
+  audioMixInputs.postludeSeconds.value = config.audioMix?.postludeSeconds ?? 3;
+  voiceMusicSnapshot = getVoiceMusicSnapshot();
+  setVoiceMusicLock(true);
 
   const savedTopicIndex = Number(localStorage.getItem(adminUiStorage.topicIndex));
   const preferredTopicIndex = Number.isInteger(savedTopicIndex) ? savedTopicIndex : selectedTopicIndex;
@@ -194,6 +211,20 @@ function renderHostSelect(config) {
   }
 }
 
+function renderVoiceHostSelect(config) {
+  if (!voiceHostSelect) return;
+  const hosts = config.prompts?.hosts || {};
+  const activeHostId = config.prompts?.activeHostId || Object.keys(hosts)[0] || "sweetiefox";
+  voiceHostSelect.innerHTML = "";
+  for (const [hostId, host] of Object.entries(hosts)) {
+    const option = document.createElement("option");
+    option.value = hostId;
+    option.textContent = host.name || hostId;
+    option.selected = hostId === activeHostId;
+    voiceHostSelect.append(option);
+  }
+}
+
 function getActiveHost(config = currentConfig) {
   const hosts = config?.prompts?.hosts || {};
   const hostId = config?.prompts?.activeHostId || Object.keys(hosts)[0] || "sweetiefox";
@@ -201,7 +232,7 @@ function getActiveHost(config = currentConfig) {
 }
 
 function getActiveHostId() {
-  return activeHostSelect?.value || currentConfig?.prompts?.activeHostId || "sweetiefox";
+  return currentConfig?.prompts?.activeHostId || activeHostSelect?.value || "sweetiefox";
 }
 
 function renderTopicDetail() {
@@ -322,6 +353,77 @@ async function saveConfig() {
   setStatus(response.ok ? "Настройки сохранены" : "Ошибка сохранения");
 }
 
+async function saveVoiceMusicSettings() {
+  if (!voiceMusicUnlocked) {
+    setStatus("Сначала разблокируйте параметры Голос/Музыка");
+    return;
+  }
+
+  const nextSnapshot = getVoiceMusicSnapshot();
+  if (nextSnapshot !== voiceMusicSnapshot) {
+    const confirmed = window.confirm("Сохранить изменения параметров голоса и музыки? Они сразу повлияют на следующие выходы ведущего в эфир.");
+    if (!confirmed) return;
+  }
+
+  await saveConfig();
+  voiceMusicSnapshot = getVoiceMusicSnapshot();
+  setVoiceMusicLock(true);
+}
+
+function toggleVoiceMusicLock() {
+  if (voiceMusicUnlocked) {
+    setVoiceMusicLock(true);
+    return;
+  }
+
+  setVoiceMusicLock(false);
+}
+
+function setVoiceMusicLock(locked) {
+  voiceMusicUnlocked = !locked;
+  const fields = [
+    voiceHostSelect,
+    ...Object.values(voiceInputs),
+    ...Object.values(audioMixInputs),
+  ].filter(Boolean);
+  fields.forEach((field) => {
+    field.disabled = locked;
+  });
+  if (saveButton) saveButton.disabled = locked;
+  if (voiceMusicLockButton) {
+    voiceMusicLockButton.textContent = locked ? "🔒 Заблокировано" : "🔓 Разблокировано";
+  }
+  if (voiceMusicLockStatus) {
+    voiceMusicLockStatus.textContent = locked
+      ? "Параметры защищены от случайного изменения"
+      : "Редактирование включено";
+  }
+}
+
+function getVoiceMusicSnapshot() {
+  if (!currentConfig) return "";
+  return JSON.stringify({
+    activeHostId: getActiveHostId(),
+    voice: {
+      model: voiceInputs.model?.value || "eleven_multilingual_v2",
+      stability: Number(voiceInputs.stability.value),
+      similarityBoost: Number(voiceInputs.similarityBoost.value),
+      style: Number(voiceInputs.style.value),
+      speed: Number(voiceInputs.speed.value),
+      speakerBoost: voiceInputs.speakerBoost.checked,
+    },
+    audioMix: {
+      musicLevel: Number(audioMixInputs.musicLevel.value),
+      voiceLevel: Number(audioMixInputs.voiceLevel.value),
+      duckingRatio: Number(audioMixInputs.duckingRatio.value),
+      preludeSeconds: Number(audioMixInputs.preludeSeconds.value),
+      duckFadeSeconds: Number(audioMixInputs.duckFadeSeconds.value),
+      restoreFadeSeconds: Number(audioMixInputs.restoreFadeSeconds.value),
+      postludeSeconds: Number(audioMixInputs.postludeSeconds.value),
+    },
+  });
+}
+
 async function refreshPrompts() {
   const confirmed = window.confirm("Обновить промпты ведущего и общий промпт? Сохраненные mp3 останутся в архиве. Новые правила применятся к следующим генерациям, а уже сохраненные подтемы будут воспроизводиться из архива, пока ты их не удалишь.");
   if (!confirmed) return;
@@ -373,16 +475,14 @@ function collectConfig() {
       },
     },
     voice: {
+      model: voiceInputs.model?.value || "eleven_multilingual_v2",
       stability: Number(voiceInputs.stability.value),
       similarityBoost: Number(voiceInputs.similarityBoost.value),
       style: Number(voiceInputs.style.value),
       speed: Number(voiceInputs.speed.value),
       speakerBoost: voiceInputs.speakerBoost.checked,
     },
-    factPolicy: {
-      archiveAfterTotal: Number(factPolicyInputs.archiveAfterTotal.value),
-      useArchiveWhenReady: factPolicyInputs.useArchiveWhenReady.checked,
-    },
+    factPolicy: currentConfig.factPolicy,
     topicCycle: {
       minIntervalMinutes: Number(topicCycleMinInput.value) || 5,
       maxIntervalMinutes: Number(topicCycleMaxInput.value) || 6,
@@ -391,6 +491,10 @@ function collectConfig() {
       musicLevel: Number(audioMixInputs.musicLevel.value),
       voiceLevel: Number(audioMixInputs.voiceLevel.value),
       duckingRatio: Number(audioMixInputs.duckingRatio.value),
+      preludeSeconds: Number(audioMixInputs.preludeSeconds.value),
+      duckFadeSeconds: Number(audioMixInputs.duckFadeSeconds.value),
+      restoreFadeSeconds: Number(audioMixInputs.restoreFadeSeconds.value),
+      postludeSeconds: Number(audioMixInputs.postludeSeconds.value),
     },
   };
 }

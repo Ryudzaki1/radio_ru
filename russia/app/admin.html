@@ -27,7 +27,7 @@
           <button class="admin-tab active" type="button" data-tab="air">Эфир</button>
           <button class="admin-tab" type="button" data-tab="topics">Темы</button>
           <button class="admin-tab" type="button" data-tab="prompts">Промпты</button>
-          <button class="admin-tab" type="button" data-tab="voice">Голос</button>
+          <button class="admin-tab" type="button" data-tab="voice">Голос/Музыка</button>
           <button class="admin-tab" type="button" data-tab="archive">Архив</button>
           <button class="admin-tab" type="button" data-tab="listeners">Слушатели</button>
           <button class="admin-tab" type="button" data-tab="tests">Тесты</button>
@@ -209,9 +209,31 @@
       </section>
 
       <section class="panel admin-panel" data-panel="voice">
+        <div class="section-head">
+          <div>
+            <h2>Голос/Музыка</h2>
+            <p id="voiceMusicLockStatus">Параметры защищены от случайного изменения</p>
+          </div>
+          <div class="inline-actions">
+            <button id="voiceMusicLockButton" type="button">🔒 Заблокировано</button>
+            <button id="saveButton" class="primary-action" type="button">Сохранить звук</button>
+          </div>
+        </div>
+
         <div class="voice-layout">
           <div class="voice-controls block-panel">
-            <h2>Параметры голоса</h2>
+            <h2>Ведущий</h2>
+            <label>
+              <span>Активный ведущий</span>
+              <select id="voiceHostSelect"></select>
+            </label>
+            <label>
+              <span>Модель ElevenLabs</span>
+              <select id="voiceModel">
+                <option value="eleven_multilingual_v2">Eleven Multilingual v2</option>
+                <option value="eleven_flash_v2_5">Eleven Flash v2.5</option>
+              </select>
+            </label>
             <label><span>Stability</span><input id="stability" type="range" min="0" max="1" step="0.01"></label>
             <label><span>Similarity</span><input id="similarityBoost" type="range" min="0" max="1" step="0.01"></label>
             <label><span>Style</span><input id="style" type="range" min="0" max="1" step="0.01"></label>
@@ -220,22 +242,14 @@
           </div>
 
           <div class="voice-controls block-panel">
-            <h2>Экономия генерации</h2>
-            <label>
-              <span>Сколько аудиофактов накопить перед архивным режимом</span>
-              <input id="archiveAfterTotal" type="number" min="10" max="2000">
-            </label>
-            <label class="check-row"><input id="useArchiveWhenReady" type="checkbox"> Брать факты из архива, когда их достаточно</label>
-            <div class="admin-actions">
-              <button id="saveButton" type="button">Сохранить настройки</button>
-            </div>
-          </div>
-
-          <div class="voice-controls block-panel">
-            <h2>Микс эфира</h2>
-            <label><span>Музыка в обычном режиме</span><input id="musicLevel" type="range" min="0" max="1" step="0.01"></label>
-            <label><span>Голос диктора</span><input id="voiceLevel" type="range" min="0" max="1" step="0.01"></label>
-            <label><span>Музыка под диктором от уровня голоса</span><input id="duckingRatio" type="range" min="0" max="1" step="0.01"></label>
+            <h2>Музыка</h2>
+            <label><span>Громкость музыки в обычном режиме</span><input id="musicLevel" type="range" min="0" max="2" step="0.01"></label>
+            <label><span>Громкость голоса ведущего</span><input id="voiceLevel" type="range" min="0" max="2" step="0.01"></label>
+            <label><span>Музыка под голосом ведущего</span><input id="duckingRatio" type="range" min="0" max="1" step="0.01"></label>
+            <label><span>Пауза до начала затухания, секунд</span><input id="voicePreludeSeconds" type="number" min="0" max="30" step="0.1"></label>
+            <label><span>Затухание перед голосом, секунд</span><input id="duckFadeSeconds" type="number" min="0.2" max="10" step="0.1"></label>
+            <label><span>Возврат музыки после голоса, секунд</span><input id="restoreFadeSeconds" type="number" min="0.2" max="10" step="0.1"></label>
+            <label><span>Пауза после речи ведущего, секунд</span><input id="voicePostludeSeconds" type="number" min="0" max="30" step="0.1"></label>
           </div>
         </div>
       </section>
