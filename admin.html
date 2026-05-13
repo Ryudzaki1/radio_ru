@@ -79,11 +79,6 @@
             <input id="volume" type="range" min="0" max="1" step="0.01" value="0.72">
           </label>
         </div>
-        <div class="broadcast-actions">
-          <button id="queueGreetingButton" class="primary-action" type="button">Приветствие в эфир</button>
-          <button id="queueFactButton" class="primary-action" type="button">Сказать следующую тему</button>
-          <button id="queueFarewellButton" class="primary-action" type="button">Прощание в эфир</button>
-        </div>
         </div>
 
         <div class="panel console admin-monitor" aria-label="Диктор в эфире">
@@ -127,10 +122,20 @@
             <strong>Автоэфир тем</strong>
             <span id="topicCycleStatus">Остановлен</span>
           </div>
+          <div class="topic-cycle-settings">
+            <label><span>Интервал от, минут</span><input id="topicCycleMinInput" type="number" min="1" max="240" step="0.5"></label>
+            <label><span>Интервал до, минут</span><input id="topicCycleMaxInput" type="number" min="1" max="240" step="0.5"></label>
+          </div>
           <div class="inline-actions">
             <button id="startTopicCycleButton" class="primary-action" type="button">Запустить выбранную тему</button>
             <button id="stopTopicCycleButton" type="button">Остановить</button>
           </div>
+        </div>
+
+        <div class="dictor-actions">
+          <button id="queueGreetingButton" class="primary-action" type="button">Приветствие в эфир</button>
+          <button id="queueFactButton" class="primary-action" type="button">Сказать следующую подтему</button>
+          <button id="queueFarewellButton" class="primary-action" type="button">Прощание в эфир</button>
         </div>
 
         <div class="topic-editor">

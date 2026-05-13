@@ -178,12 +178,16 @@ function createServer(config) {
       }
 
       if (request.method === "POST" && url.pathname === "/api/admin/topic-cycle/start") {
-        await sendJson(response, 200, await topicCycle.start(await readJson(request).catch(() => ({}))));
+        const status = await topicCycle.start(await readJson(request).catch(() => ({})));
+        await emitAdmin(config, "topic-cycle", status);
+        await sendJson(response, 200, status);
         return;
       }
 
       if (request.method === "POST" && url.pathname === "/api/admin/topic-cycle/stop") {
-        await sendJson(response, 200, await topicCycle.stop());
+        const status = await topicCycle.stop();
+        await emitAdmin(config, "topic-cycle", status);
+        await sendJson(response, 200, status);
         return;
       }
 
@@ -279,14 +283,16 @@ function createServer(config) {
       if (request.method === "DELETE" && url.pathname === "/api/admin/archive") {
         const relativePath = url.searchParams.get("path");
         await deleteArchiveItem(config, relativePath);
-        await readAvailableFactLog(config, { prune: true });
+        await emitFactState(config);
         await sendJson(response, 200, { deleted: true, items: await listArchiveItems(config) });
         return;
       }
 
       if (request.method === "PUT" && url.pathname === "/api/admin/config") {
         const body = await readJson(request);
-        await sendJson(response, 200, await writeAdminConfig(config, body));
+        const admin = await writeAdminConfig(config, body);
+        await emitAdmin(config, "config", admin);
+        await sendJson(response, 200, admin);
         return;
       }
 
@@ -294,6 +300,8 @@ function createServer(config) {
         const body = await readJson(request);
         const admin = await writeAdminConfig(config, body);
         await resetFactLog(config);
+        await emitAdmin(config, "config", admin);
+        await emitFactState(config);
         await sendJson(response, 200, { admin, reset: true });
         return;
       }
@@ -363,6 +371,8 @@ function createServer(config) {
         const payload = await createFact(config, body);
         const event = { ...payload, title: "Тема эфира", source: "admin" };
         await sendGeneratedVoice(response, config, broadcast, event, payload);
+        await emitFactState(config);
+        await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
         return;
       }
 
@@ -495,6 +505,7 @@ function createTopicCycleController(config, broadcast) {
     const delay = Math.max(1_000, Math.round(delayMs));
     state.nextRunAt = new Date(Date.now() + delay).toISOString();
     saveState().catch(() => {});
+    emitAdmin(config, "topic-cycle", getStatus()).catch(() => {});
     timer = setTimeout(() => {
       runOnce().catch((error) => {
         console.error(`Topic cycle run failed: ${error.message}`);
@@ -528,6 +539,8 @@ function createTopicCycleController(config, broadcast) {
         runCount: Number(state.runCount || 0) + 1,
       };
       await writeSystemLog(config, "topic_cycle_fact_queued", state.lastRun);
+      await emitFactState(config);
+      await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
     } catch (error) {
       state = {
         ...state,
@@ -540,6 +553,7 @@ function createTopicCycleController(config, broadcast) {
     } finally {
       running = false;
       await saveState();
+      await emitAdmin(config, "topic-cycle", getStatus());
       if (state.active) scheduleNext();
     }
   }
@@ -885,6 +899,10 @@ function openEventStream(request, response, clients) {
 
 async function emitAdmin(config, event, data) {
   emitEvent(adminClients, event, data);
+}
+
+async function emitFactState(config) {
+  await emitAdmin(config, "fact-log", await readAvailableFactLog(config, { prune: true }));
 }
 
 async function emitRadio(event, data) {

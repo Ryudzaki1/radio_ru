@@ -985,6 +985,18 @@ input[type="range"] {
   background: var(--surface-solid);
 }
 
+.topic-cycle-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(130px, 1fr));
+  gap: 10px;
+  min-width: 280px;
+}
+
+.topic-cycle-settings label {
+  display: grid;
+  gap: 5px;
+}
+
 .topic-cycle-panel > div:first-child {
   min-width: 0;
   display: grid;
@@ -1048,7 +1060,7 @@ input[type="range"] {
 .subtopic-chip {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 34px;
+  grid-template-columns: minmax(0, 1fr) auto 34px;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -1057,6 +1069,25 @@ input[type="range"] {
   border-radius: var(--radius);
   background: var(--surface-solid);
   transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.subtopic-state {
+  min-width: 54px;
+  min-height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--muted);
+  background: var(--surface-soft);
+}
+
+.subtopic-chip.saved .subtopic-state {
+  color: var(--success-text);
+  background: rgba(48, 209, 88, 0.15);
 }
 
 .subtopic-chip:hover {
@@ -1139,14 +1170,16 @@ input[type="range"] {
   justify-content: flex-end;
 }
 
-.broadcast-actions {
+.broadcast-actions,
+.dictor-actions {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
 }
 
-.broadcast-actions button {
+.broadcast-actions button,
+.dictor-actions button {
   min-height: 48px;
 }
 
@@ -1396,7 +1429,9 @@ html[data-theme="dark"] audio {
 
   .topic-editor,
   .prompt-grid,
-  .broadcast-actions {
+  .broadcast-actions,
+  .dictor-actions,
+  .topic-cycle-settings {
     grid-template-columns: 1fr;
   }
 
@@ -1412,10 +1447,11 @@ html[data-theme="dark"] audio {
   .theme-toggle,
   .primary,
   .controls button,
-  .admin-actions button,
-  .inline-actions button,
-  .broadcast-actions button,
-  .admin-link {
+    .admin-actions button,
+    .inline-actions button,
+    .broadcast-actions button,
+    .dictor-actions button,
+    .admin-link {
     width: 100%;
     justify-content: center;
   }

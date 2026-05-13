@@ -101,6 +101,12 @@ function getArchivedFacts(log, voiceId) {
   return normalizeFactLog(log).facts.filter((fact) => fact.voiceId === voiceId && fact.audioUrl);
 }
 
+function getArchivedFactForSelection(log, voiceId, topicName, subtopicName) {
+  return getArchivedFacts(log, voiceId)
+    .filter((fact) => fact.topic === topicName && fact.subtopic === subtopicName)
+    .at(-1) || null;
+}
+
 async function factAudioExists(config, fact) {
   const audioPath = resolveArchiveAudioPath(config, fact.audioUrl);
   if (!audioPath) return false;
@@ -169,6 +175,7 @@ function normalizeCursor(cursor = {}) {
 
 module.exports = {
   addFactLogEntry,
+  getArchivedFactForSelection,
   advanceCursor,
   getArchivedFacts,
   getRecentFacts,

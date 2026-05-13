@@ -20,6 +20,8 @@ const deleteTopicButton = document.querySelector("#deleteTopicButton");
 const startTopicCycleButton = document.querySelector("#startTopicCycleButton");
 const stopTopicCycleButton = document.querySelector("#stopTopicCycleButton");
 const topicCycleStatus = document.querySelector("#topicCycleStatus");
+const topicCycleMinInput = document.querySelector("#topicCycleMinInput");
+const topicCycleMaxInput = document.querySelector("#topicCycleMaxInput");
 const archiveList = document.querySelector("#archiveList");
 const refreshArchiveButton = document.querySelector("#refreshArchiveButton");
 const clearArchiveButton = document.querySelector("#clearArchiveButton");
@@ -137,6 +139,8 @@ function renderConfig(config) {
   voiceInputs.speakerBoost.checked = config.voice.speakerBoost;
   factPolicyInputs.archiveAfterTotal.value = config.factPolicy.archiveAfterTotal;
   factPolicyInputs.useArchiveWhenReady.checked = config.factPolicy.useArchiveWhenReady;
+  topicCycleMinInput.value = config.topicCycle?.minIntervalMinutes ?? 5;
+  topicCycleMaxInput.value = config.topicCycle?.maxIntervalMinutes ?? 6;
   audioMixInputs.musicLevel.value = config.audioMix?.musicLevel ?? 0.72;
   audioMixInputs.voiceLevel.value = config.audioMix?.voiceLevel ?? 1;
   audioMixInputs.duckingRatio.value = config.audioMix?.duckingRatio ?? 0.18;
@@ -152,14 +156,14 @@ function renderTopicList() {
   const voiced = getVoicedSets();
   topicList.innerHTML = "";
   currentConfig.topics.forEach((topic, index) => {
-    const voicedCount = topic.subtopics.filter((subtopic) => voiced.subtopics.has(getPairKey(topic.name, subtopic))).length;
+    const savedCount = topic.subtopics.filter((subtopic) => voiced.savedSubtopics.has(getPairKey(topic.name, subtopic))).length;
     const button = document.createElement("button");
     button.type = "button";
     button.className = "topic-pill";
     button.classList.toggle("active", index === selectedTopicIndex);
-    button.classList.toggle("partial", voicedCount > 0 && voicedCount < topic.subtopics.length);
-    button.classList.toggle("complete", voicedCount === topic.subtopics.length && topic.subtopics.length > 0);
-    button.innerHTML = `<span>${String(index + 1).padStart(2, "0")}</span><strong></strong><small>${voicedCount}/${topic.subtopics.length} озвучено</small>`;
+    button.classList.toggle("partial", savedCount > 0 && savedCount < topic.subtopics.length);
+    button.classList.toggle("complete", savedCount === topic.subtopics.length && topic.subtopics.length > 0);
+    button.innerHTML = `<span>${String(index + 1).padStart(2, "0")}</span><strong></strong><small>${savedCount}/${topic.subtopics.length} mp3 сохранено</small>`;
     button.querySelector("strong").textContent = topic.name || "Новая тема";
     button.addEventListener("click", () => {
       selectedTopicIndex = index;
@@ -180,9 +184,12 @@ function renderTopicDetail() {
   subtopicList.innerHTML = "";
 
   topic.subtopics.forEach((subtopic, index) => {
+    const key = getPairKey(topic.name, subtopic);
+    const saved = voiced.savedSubtopics.has(key);
     const item = document.createElement("div");
     item.className = "subtopic-chip";
-    item.classList.toggle("voiced", voiced.subtopics.has(getPairKey(topic.name, subtopic)));
+    item.classList.toggle("voiced", voiced.subtopics.has(key));
+    item.classList.toggle("saved", saved);
 
     const input = document.createElement("input");
     input.type = "text";
@@ -190,6 +197,11 @@ function renderTopicDetail() {
     input.addEventListener("input", () => {
       topic.subtopics[index] = input.value;
     });
+
+    const state = document.createElement("span");
+    state.className = "subtopic-state";
+    state.textContent = saved ? "mp3" : "новая";
+    state.title = saved ? "Аудио уже сохранено. Повторный запуск возьмет архив без токенов." : "Аудио еще нет. Первый запуск создаст текст и голос.";
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -201,7 +213,7 @@ function renderTopicDetail() {
       renderTopicList();
     });
 
-    item.append(input, remove);
+    item.append(input, state, remove);
     subtopicList.append(item);
   });
 }
@@ -331,6 +343,10 @@ function collectConfig() {
       archiveAfterTotal: Number(factPolicyInputs.archiveAfterTotal.value),
       useArchiveWhenReady: factPolicyInputs.useArchiveWhenReady.checked,
     },
+    topicCycle: {
+      minIntervalMinutes: Number(topicCycleMinInput.value) || 5,
+      maxIntervalMinutes: Number(topicCycleMaxInput.value) || 6,
+    },
     audioMix: {
       musicLevel: Number(audioMixInputs.musicLevel.value),
       voiceLevel: Number(audioMixInputs.voiceLevel.value),
@@ -402,8 +418,8 @@ async function startTopicCycle() {
       body: JSON.stringify({
         topicIndex: selectedTopicIndex,
         subtopicIndex: 0,
-        minIntervalMs: 5 * 60 * 1000,
-        maxIntervalMs: 6 * 60 * 1000,
+        minIntervalMs: Math.max(1, Number(topicCycleMinInput.value) || 5) * 60 * 1000,
+        maxIntervalMs: Math.max(Number(topicCycleMinInput.value) || 5, Number(topicCycleMaxInput.value) || 6) * 60 * 1000,
         immediate: true,
       }),
     });
@@ -612,6 +628,19 @@ function connectAdminEvents() {
     archiveItems = JSON.parse(event.data).items || [];
     renderArchive();
   });
+  events.addEventListener("config", (event) => {
+    currentConfig = JSON.parse(event.data);
+    renderConfig(currentConfig);
+  });
+  events.addEventListener("fact-log", (event) => {
+    factLog = JSON.parse(event.data);
+    renderTopicList();
+    renderTopicDetail();
+  });
+  events.addEventListener("topic-cycle", (event) => {
+    topicCycle = JSON.parse(event.data);
+    renderTopicCycleStatus();
+  });
 }
 
 async function deleteArchiveItem(item) {
@@ -635,12 +664,14 @@ async function deleteArchiveItem(item) {
 
 function getVoicedSets() {
   const subtopics = new Set();
+  const savedSubtopics = new Set();
   const topics = new Set();
   for (const fact of factLog.facts || []) {
     if (fact.topic) topics.add(fact.topic);
     if (fact.topic && fact.subtopic) subtopics.add(getPairKey(fact.topic, fact.subtopic));
+    if (fact.topic && fact.subtopic && fact.audioUrl) savedSubtopics.add(getPairKey(fact.topic, fact.subtopic));
   }
-  return { topics, subtopics };
+  return { topics, subtopics, savedSubtopics };
 }
 
 function getPairKey(topic, subtopic) {

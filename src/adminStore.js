@@ -72,6 +72,10 @@ const defaultAdminConfig = {
     archiveAfterTotal: 200,
     useArchiveWhenReady: false,
   },
+  topicCycle: {
+    minIntervalMinutes: 5,
+    maxIntervalMinutes: 6,
+  },
 };
 
 defaultAdminConfig.prompts.listener = "Ответь слушателю как диктор chill radio Sweetie Fox: спокойно, женственно, мягко, с паузами и без спешки. Делай подробный эфирный ответ, но держи структуру живой радиоречи.";
@@ -97,6 +101,8 @@ async function ensureAdminConfig(config) {
 }
 
 function mergeAdminConfig(input = {}) {
+  const minTopicInterval = clampNumber(input.topicCycle?.minIntervalMinutes, defaultAdminConfig.topicCycle.minIntervalMinutes, 1, 240);
+  const maxTopicInterval = clampNumber(input.topicCycle?.maxIntervalMinutes, defaultAdminConfig.topicCycle.maxIntervalMinutes, 1, 240);
   return {
     stationName: String(input.stationName || defaultAdminConfig.stationName).slice(0, 80),
     topics: normalizeTopicTree(input.topics),
@@ -122,6 +128,10 @@ function mergeAdminConfig(input = {}) {
     factPolicy: {
       archiveAfterTotal: Math.round(clampNumber(input.factPolicy?.archiveAfterTotal, defaultAdminConfig.factPolicy.archiveAfterTotal, 10, 2000)),
       useArchiveWhenReady: Boolean(input.factPolicy?.useArchiveWhenReady ?? defaultAdminConfig.factPolicy.useArchiveWhenReady),
+    },
+    topicCycle: {
+      minIntervalMinutes: minTopicInterval,
+      maxIntervalMinutes: Math.max(minTopicInterval, maxTopicInterval),
     },
   };
 }

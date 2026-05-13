@@ -3,7 +3,7 @@ const path = require("node:path");
 const { fallbackScript, generateFact, generateFarewell, generateGreeting, generateListenerAnswer, generateScript } = require("./deepseek");
 const { synthesize } = require("./elevenlabs");
 const { readAdminConfig } = require("../adminStore");
-const { addFactLogEntry, advanceCursor, getArchivedFacts, getRecentFacts, readAvailableFactLog } = require("../factLog");
+const { addFactLogEntry, advanceCursor, getArchivedFactForSelection, getRecentFacts, readAvailableFactLog } = require("../factLog");
 
 let factQueue = Promise.resolve();
 
@@ -60,29 +60,30 @@ async function createFact(config, input = {}) {
 async function createFactUnlocked(config, input = {}) {
   const admin = await readAdminConfig(config);
   const log = await readAvailableFactLog(config, { prune: true });
-  const archived = getArchivedFacts(log, config.elevenlabs.voiceId);
-
-  if (admin.factPolicy.useArchiveWhenReady && archived.length >= admin.factPolicy.archiveAfterTotal) {
-    const item = archived[Math.floor(Math.random() * archived.length)];
-    return {
-      text: item.text,
-      audioUrl: item.audioUrl,
-      archived: true,
-      archivePath: item.archivePath,
-      theme: item.topic,
-      topic: item.topic,
-      subtopic: item.subtopic,
-      kind: "facts",
-      voiceId: item.voiceId,
-      source: "archive",
-    };
-  }
-
   const selection = input.topic && input.subtopic
     ? resolveRequestedSelection(admin, input)
     : await advanceCursor(config, admin);
   const topicName = selection.topic.name;
   const subtopicName = selection.subtopic;
+
+  const archived = getArchivedFactForSelection(log, config.elevenlabs.voiceId, topicName, subtopicName);
+  if (archived && !input.forceGenerate) {
+    return {
+      text: archived.text,
+      audioUrl: archived.audioUrl,
+      archived: true,
+      archivePath: archived.archivePath,
+      theme: archived.topic,
+      topic: archived.topic,
+      topicIndex: selection.topicIndex,
+      subtopic: archived.subtopic,
+      subtopicIndex: selection.subtopicIndex,
+      kind: "facts",
+      voiceId: archived.voiceId,
+      source: "archive",
+    };
+  }
+
   const recentFacts = getRecentFacts(log, topicName, subtopicName, 8);
 
   const text = await generateFact(config.deepseek, topicName, subtopicName, admin, recentFacts, selection).catch((error) => {
