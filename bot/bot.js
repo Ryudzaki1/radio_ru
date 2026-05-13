@@ -42,6 +42,7 @@ if (!token || !listenerApiToken) {
 }
 
 let offset = 0;
+const pendingAdminQuestionChatIds = new Set();
 
 scheduleRadioLinkNotification();
 schedulePublicUrlHealthCheck();
@@ -59,12 +60,13 @@ async function poll() {
       const updates = await telegram("getUpdates", {
         offset,
         timeout: 25,
-        allowed_updates: ["message"],
+        allowed_updates: ["message", "callback_query"],
       });
 
       for (const update of updates.result || []) {
         offset = update.update_id + 1;
         if (update.message) await handleMessage(update.message);
+        if (update.callback_query) await handleCallbackQuery(update.callback_query);
       }
     } catch (error) {
       console.error(`poll error: ${error.message}`);
@@ -81,6 +83,7 @@ async function handleMessage(message) {
   const profileName = getProfileName(message.from);
   const command = text.split(/\s+/)[0].split("@")[0].toLowerCase();
   const isAdmin = isBotAdmin(message.from);
+  const adminQuestionIsPending = pendingAdminQuestionChatIds.has(String(chatId));
 
   const canAskQuestions = isAdmin || isQuestionUserAllowed(message.from);
 
@@ -88,6 +91,7 @@ async function handleMessage(message) {
     const currentPublicUrl = await getPublicRadioUrl();
     if (isAdmin) {
       await sendAdminPanel(chatId, currentPublicUrl);
+      return;
     }
     if (!canAskQuestions) {
       await sendListenOnlyIntro(chatId, currentPublicUrl);
@@ -112,7 +116,7 @@ async function handleMessage(message) {
   }
 
   if (isAdmin && isAdminPanelText(text, adminPanelLabels.question)) {
-    await sendQuestionPrompt(chatId);
+    await startAdminQuestionMode(chatId);
     return;
   }
 
@@ -145,7 +149,11 @@ async function handleMessage(message) {
       await sendListenOnly(chatId, await getPublicRadioUrl());
       return;
     }
-    await sendQuestionPrompt(chatId);
+    if (isAdmin) {
+      await startAdminQuestionMode(chatId);
+    } else {
+      await sendQuestionPrompt(chatId);
+    }
     return;
   }
 
@@ -159,6 +167,18 @@ async function handleMessage(message) {
   if (!canAskQuestions) {
     await sendListenOnly(chatId, await getPublicRadioUrl());
     return;
+  }
+
+  if (isAdmin && !adminQuestionIsPending) {
+    await send(chatId, "Чтобы отправить вопрос в эфир, сначала нажми кнопку «Вопрос».", buildAdminPanelReplyMarkup());
+    return;
+  }
+
+  if (isAdmin) {
+    pendingAdminQuestionChatIds.delete(String(chatId));
+    await radio("/api/listeners/start", { telegramId, username, name: profileName }).catch((error) => {
+      console.error(`admin listener registration failed: ${error.message}`);
+    });
   }
 
   const status = await radio("/api/listeners/status", { telegramId, username });
@@ -213,6 +233,39 @@ async function handleMessage(message) {
     `Осталось бесплатных вопросов: ${formatRemaining(accepted.user)}.`,
     "Открой эфир и слушай: Sweetie Fox ответит в общей очереди.",
   ].join("\n"), await getPublicRadioUrl());
+  if (isAdmin) await sendAdminPanel(chatId, await getPublicRadioUrl(), { includeRadioLink: false });
+}
+
+async function handleCallbackQuery(query) {
+  const chatId = query.message?.chat?.id || query.from?.id;
+  const data = String(query.data || "");
+  if (!chatId) return;
+
+  if (!isBotAdmin(query.from)) {
+    await answerCallbackQuery(query.id, "Эта панель доступна только админу.");
+    await sendAccessDenied(chatId);
+    return;
+  }
+
+  if (data === "admin:question") {
+    await answerCallbackQuery(query.id, "Напиши вопрос следующим сообщением.");
+    await startAdminQuestionMode(chatId);
+    return;
+  }
+
+  if (data === "admin:radio") {
+    await answerCallbackQuery(query.id, "Отправляю ссылку.");
+    await sendRadioLinkMessage(chatId);
+    return;
+  }
+
+  if (data === "admin:tokens") {
+    await answerCallbackQuery(query.id, "Проверяю остатки.");
+    await sendAiUsageReport(chatId);
+    return;
+  }
+
+  await answerCallbackQuery(query.id);
 }
 
 async function sendStartIntro(chatId, publicUrl) {
@@ -262,11 +315,20 @@ async function sendQuestionPrompt(chatId) {
   await send(chatId, "Напиши вопрос одним сообщением. Я передам его Sweetie Fox в очередь эфира.");
 }
 
-async function sendAdminPanel(chatId, publicUrl) {
+async function startAdminQuestionMode(chatId) {
+  pendingAdminQuestionChatIds.add(String(chatId));
+  await send(chatId, "Напиши вопрос следующим сообщением. После отправки режим вопроса выключится.", {
+    force_reply: true,
+    input_field_placeholder: "Вопрос для Sweetie Fox",
+  });
+}
+
+async function sendAdminPanel(chatId, publicUrl, options = {}) {
   await send(chatId, [
     "Админ-панель Sweetie Fox.",
     "Выбери действие кнопкой ниже или используй команды: /question, /radio, /tokens.",
   ].join("\n"), buildAdminPanelReplyMarkup());
+  if (options.includeRadioLink === false) return;
   await sendRadioLink(chatId, [
     "Актуальная ссылка на эфир:",
     "",
@@ -342,6 +404,14 @@ async function telegram(method, body) {
   return payload;
 }
 
+async function answerCallbackQuery(callbackQueryId, text = "") {
+  await telegram("answerCallbackQuery", {
+    callback_query_id: callbackQueryId,
+    text,
+    show_alert: false,
+  });
+}
+
 async function send(chatId, text, replyMarkup = undefined) {
   await telegram("sendMessage", {
     chat_id: chatId,
@@ -406,12 +476,13 @@ function buildRadioReplyMarkup(url) {
 
 function buildAdminPanelReplyMarkup() {
   return {
-    keyboard: [
-      [{ text: adminPanelLabels.question }, { text: adminPanelLabels.radio }],
-      [{ text: adminPanelLabels.tokens }],
+    inline_keyboard: [
+      [
+        { text: adminPanelLabels.question, callback_data: "admin:question" },
+        { text: adminPanelLabels.radio, callback_data: "admin:radio" },
+      ],
+      [{ text: adminPanelLabels.tokens, callback_data: "admin:tokens" }],
     ],
-    resize_keyboard: true,
-    is_persistent: true,
   };
 }
 
