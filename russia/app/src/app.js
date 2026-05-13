@@ -207,6 +207,20 @@ function createServer(config) {
         return;
       }
 
+      if (request.method === "POST" && url.pathname === "/api/admin/log") {
+        const body = await readJson(request).catch(() => ({}));
+        await writeSystemLog(config, "admin_client_action", {
+          action: body.action || null,
+          target: body.target || null,
+          value: body.value || null,
+          tab: body.tab || null,
+          error: body.error || null,
+          details: body.details || null,
+        });
+        await sendJson(response, 200, { logged: true });
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/admin/music/insert") {
         const body = await readJson(request);
         const ok = broadcast.enqueueMusic(body.file);
@@ -291,6 +305,14 @@ function createServer(config) {
       if (request.method === "PUT" && url.pathname === "/api/admin/config") {
         const body = await readJson(request);
         const admin = await writeAdminConfig(config, body);
+        await writeSystemLog(config, "admin_config_saved", {
+          stationName: admin.stationName,
+          activeHostId: admin.prompts?.activeHostId || null,
+          voiceModel: admin.voice?.model || null,
+          musicLevel: admin.audioMix?.musicLevel ?? null,
+          voiceLevel: admin.audioMix?.voiceLevel ?? null,
+          duckingRatio: admin.audioMix?.duckingRatio ?? null,
+        });
         await emitAdmin(config, "config", admin);
         await sendJson(response, 200, admin);
         return;
@@ -398,6 +420,11 @@ function createServer(config) {
       await sendJson(response, 404, { error: "Not found" });
     } catch (error) {
       console.error(error);
+      writeSystemLog(config, "api_request_error", {
+        method: request.method,
+        url: request.url,
+        error: error.message || "Server error",
+      }).catch(() => {});
       if (!response.headersSent) {
         await sendJson(response, error.statusCode || 500, { error: error.message || "Server error" });
       } else {
@@ -420,6 +447,10 @@ function createTopicCycleController(config, broadcast) {
   let running = false;
   let state = {
     active: false,
+    mode: "all-loop",
+    selectedTopicIndex: null,
+    selectedTopicName: null,
+    completionReason: null,
     minIntervalMs: 5 * 60_000,
     maxIntervalMs: 6 * 60_000,
     startedAt: null,
@@ -455,10 +486,16 @@ function createTopicCycleController(config, broadcast) {
 
   async function start(input = {}) {
     clearTimer();
+    const admin = await readAdminConfig(config);
+    const mode = normalizeTopicCycleMode(input.mode);
+    const selectedTopicIndex = Number.isFinite(Number(input.topicIndex))
+      ? Math.max(0, Math.min(admin.topics.length - 1, Math.floor(Number(input.topicIndex))))
+      : null;
+    const selectedTopic = selectedTopicIndex === null ? null : admin.topics[selectedTopicIndex];
 
-    if (Number.isFinite(Number(input.topicIndex))) {
+    if (selectedTopic) {
       await setCursor(config, {
-        topicIndex: Number(input.topicIndex),
+        topicIndex: selectedTopicIndex,
         subtopicIndex: Number(input.subtopicIndex) || 0,
       });
     }
@@ -466,6 +503,10 @@ function createTopicCycleController(config, broadcast) {
     state = normalizeTopicCycleState({
       ...state,
       active: true,
+      mode,
+      selectedTopicIndex,
+      selectedTopicName: selectedTopic?.name || null,
+      completionReason: null,
       minIntervalMs: input.minIntervalMs,
       maxIntervalMs: input.maxIntervalMs,
       startedAt: new Date().toISOString(),
@@ -474,6 +515,13 @@ function createTopicCycleController(config, broadcast) {
       runCount: state.runCount || 0,
     });
     await saveState();
+    await writeSystemLog(config, "topic_cycle_started", {
+      mode: state.mode,
+      selectedTopicIndex: state.selectedTopicIndex,
+      selectedTopicName: state.selectedTopicName,
+      minIntervalMs: state.minIntervalMs,
+      maxIntervalMs: state.maxIntervalMs,
+    });
     scheduleNext(input.immediate === false ? randomInterval() : 1_000);
     return getStatus();
   }
@@ -485,8 +533,14 @@ function createTopicCycleController(config, broadcast) {
       active: false,
       nextRunAt: null,
       stoppedAt: new Date().toISOString(),
+      completionReason: "manual_stop",
     };
     await saveState();
+    await writeSystemLog(config, "topic_cycle_stopped", {
+      runCount: state.runCount,
+      mode: state.mode,
+      reason: state.completionReason,
+    });
     return getStatus();
   }
 
@@ -508,7 +562,12 @@ function createTopicCycleController(config, broadcast) {
     if (!state.active || running) return;
     running = true;
     try {
-      const payload = await createFact(config);
+      await writeSystemLog(config, "topic_cycle_run_started", {
+        mode: state.mode,
+        selectedTopicName: state.selectedTopicName,
+        runCount: state.runCount,
+      });
+      const payload = await withTimeout(createFact(config), 180_000, "Topic cycle generation timed out");
       const title = payload.subtopic ? `${payload.topic}: ${payload.subtopic}` : "Тема эфира";
       const result = await enqueueGeneratedVoice(config, broadcast, {
         ...payload,
@@ -530,6 +589,22 @@ function createTopicCycleController(config, broadcast) {
         runCount: Number(state.runCount || 0) + 1,
       };
       await writeSystemLog(config, "topic_cycle_fact_queued", state.lastRun);
+      if (await shouldStopTopicCycleAfterRun(payload)) {
+        state = {
+          ...state,
+          active: false,
+          nextRunAt: null,
+          stoppedAt: new Date().toISOString(),
+          completionReason: "selected_topic_completed",
+        };
+        await writeSystemLog(config, "topic_cycle_completed", {
+          mode: state.mode,
+          selectedTopicName: state.selectedTopicName,
+          lastTopic: payload.topic,
+          lastSubtopic: payload.subtopic,
+          runCount: state.runCount,
+        });
+      }
       await emitFactState(config);
       await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
     } catch (error) {
@@ -562,6 +637,22 @@ function createTopicCycleController(config, broadcast) {
     }
   }
 
+  async function shouldStopTopicCycleAfterRun(payload) {
+    if (state.mode !== "selected-once") return false;
+    const admin = await readAdminConfig(config);
+    const topic = findSelectedTopic(admin);
+    if (!topic) return true;
+    if (payload.topic !== topic.name) return true;
+    return Number(payload.subtopicIndex) >= topic.subtopics.length - 1;
+  }
+
+  function findSelectedTopic(admin) {
+    const topics = Array.isArray(admin.topics) ? admin.topics : [];
+    return topics.find((topic) => topic.name === state.selectedTopicName)
+      || topics[state.selectedTopicIndex]
+      || null;
+  }
+
   async function saveState() {
     await fs.promises.mkdir(path.dirname(config.topicCycleStatePath), { recursive: true });
     await fs.promises.writeFile(config.topicCycleStatePath, JSON.stringify(state, null, 2), "utf8");
@@ -573,6 +664,10 @@ function normalizeTopicCycleState(input = {}) {
   const max = clampCycleNumber(input.maxIntervalMs, 6 * 60_000, min, 24 * 60 * 60_000);
   return {
     active: Boolean(input.active),
+    mode: normalizeTopicCycleMode(input.mode),
+    selectedTopicIndex: Number.isFinite(Number(input.selectedTopicIndex)) ? Math.max(0, Math.floor(Number(input.selectedTopicIndex))) : null,
+    selectedTopicName: input.selectedTopicName ? String(input.selectedTopicName).slice(0, 160) : null,
+    completionReason: input.completionReason || null,
     minIntervalMs: min,
     maxIntervalMs: max,
     startedAt: input.startedAt || null,
@@ -582,6 +677,24 @@ function normalizeTopicCycleState(input = {}) {
     lastError: input.lastError || null,
     runCount: Math.max(0, Math.floor(Number(input.runCount) || 0)),
   };
+}
+
+function normalizeTopicCycleMode(value) {
+  return value === "selected-once" ? "selected-once" : "all-loop";
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 function clampCycleNumber(value, fallback, min, max) {

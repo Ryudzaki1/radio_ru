@@ -1,7 +1,7 @@
 const fs = require("node:fs");
 const path = require("node:path");
 
-const RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 let cleanupDueAt = 0;
 
 async function writeSystemLog(config, event, data = {}) {

@@ -27,6 +27,8 @@ const stopTopicCycleButton = document.querySelector("#stopTopicCycleButton");
 const topicCycleStatus = document.querySelector("#topicCycleStatus");
 const topicCycleMinInput = document.querySelector("#topicCycleMinInput");
 const topicCycleMaxInput = document.querySelector("#topicCycleMaxInput");
+const topicCycleModeSelectedOnce = document.querySelector("#topicCycleModeSelectedOnce");
+const topicCycleModeAllLoop = document.querySelector("#topicCycleModeAllLoop");
 const archiveList = document.querySelector("#archiveList");
 const refreshArchiveButton = document.querySelector("#refreshArchiveButton");
 const clearArchiveButton = document.querySelector("#clearArchiveButton");
@@ -76,6 +78,7 @@ let selectedTopicIndex = 0;
 let adminVoiceQueue = Promise.resolve();
 let voiceMusicUnlocked = false;
 let voiceMusicSnapshot = "";
+let adminLogQueue = Promise.resolve();
 
 const adminUiStorage = {
   tab: "ai-radio.adminTab",
@@ -106,6 +109,7 @@ addSubtopicButton?.addEventListener("click", addSubtopic);
 deleteTopicButton?.addEventListener("click", deleteSelectedTopic);
 initHelpTips();
 initSyncedSliders();
+initAdminActionLogging();
 activeHostSelect?.addEventListener("change", () => {
   if (!currentConfig?.prompts) return;
   currentConfig.prompts.activeHostId = getActiveHostId();
@@ -148,6 +152,61 @@ function initSyncedSliders() {
     });
     numberInput.addEventListener("blur", () => setSyncedSliderValue(key, numberInput.value || rangeInput.value));
   });
+}
+
+function initAdminActionLogging() {
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest("button");
+    if (!target) return;
+    logAdminAction("click", {
+      target: target.id || target.textContent?.trim() || target.tagName,
+      tab: getActiveTab(),
+    });
+  });
+  document.addEventListener("change", (event) => {
+    const target = event.target;
+    if (!target?.matches?.("input, select, textarea")) return;
+    logAdminAction("change", {
+      target: target.id || target.name || target.tagName,
+      value: summarizeInputValue(target),
+      tab: getActiveTab(),
+    });
+  });
+  window.addEventListener("error", (event) => {
+    logAdminAction("js_error", {
+      error: event.message,
+      target: event.filename ? `${event.filename}:${event.lineno}` : null,
+      tab: getActiveTab(),
+    });
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    logAdminAction("promise_error", {
+      error: event.reason?.message || String(event.reason || "Unhandled promise rejection"),
+      tab: getActiveTab(),
+    });
+  });
+}
+
+function logAdminAction(action, details = {}) {
+  const payload = { action, ...details };
+  adminLogQueue = adminLogQueue
+    .catch(() => {})
+    .then(() => fetch("/api/admin/log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      keepalive: true,
+      body: JSON.stringify(payload),
+    }).catch(() => {}));
+}
+
+function getActiveTab() {
+  return document.querySelector(".admin-tab.active")?.dataset.tab || null;
+}
+
+function summarizeInputValue(target) {
+  if (target.type === "password") return "[hidden]";
+  if (target.type === "checkbox" || target.type === "radio") return target.checked;
+  return String(target.value || "").slice(0, 160);
 }
 
 function getSliderInput(key) {
@@ -658,20 +717,22 @@ function queueSelectedTopic() {
 
 async function startTopicCycle() {
   const topic = currentConfig?.topics?.[selectedTopicIndex];
-  if (!topic) {
+  const mode = getTopicCycleMode();
+  if (!topic && mode === "selected-once") {
     setStatus("Выберите тему для автоэфира");
     return;
   }
 
   startTopicCycleButton.disabled = true;
-  setStatus(`Запускаю автоэфир темы: ${topic.name}`);
+  setStatus(mode === "selected-once" ? `Запускаю выбранную тему: ${topic.name}` : "Запускаю все темы по кругу");
   try {
     await saveConfig();
     const response = await fetch("/api/admin/topic-cycle/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        topicIndex: selectedTopicIndex,
+        mode,
+        topicIndex: mode === "selected-once" ? selectedTopicIndex : undefined,
         subtopicIndex: 0,
         minIntervalMs: Math.max(1, Number(topicCycleMinInput.value) || 5) * 60 * 1000,
         maxIntervalMs: Math.max(Number(topicCycleMinInput.value) || 5, Number(topicCycleMaxInput.value) || 6) * 60 * 1000,
@@ -681,12 +742,18 @@ async function startTopicCycle() {
     topicCycle = await response.json();
     if (!response.ok) throw new Error(topicCycle.error || "Не удалось запустить автоэфир");
     renderTopicCycleStatus();
-    setStatus(`Автоэфир тем запущен: диктор будет выходить каждые ${topicCycleMinInput.value}-${topicCycleMaxInput.value} минут`);
+    setStatus(mode === "selected-once"
+      ? `Запущена только тема "${topic.name}". После последней подтемы автоэфир остановится.`
+      : `Запущены все темы по кругу: новые темы будут подхвачены автоматически.`);
   } catch (error) {
     setStatus(`Автоэфир тем: ошибка - ${error.message}`);
   } finally {
     startTopicCycleButton.disabled = false;
   }
+}
+
+function getTopicCycleMode() {
+  return topicCycleModeAllLoop?.checked ? "all-loop" : "selected-once";
 }
 
 async function stopTopicCycle() {
@@ -717,19 +784,28 @@ async function refreshTopicCycleStatus() {
 
 function renderTopicCycleStatus() {
   if (!topicCycleStatus) return;
+  if (topicCycleModeAllLoop && topicCycleModeSelectedOnce && topicCycle?.mode) {
+    topicCycleModeAllLoop.checked = topicCycle.mode === "all-loop";
+    topicCycleModeSelectedOnce.checked = topicCycle.mode !== "all-loop";
+  }
   if (!topicCycle?.active) {
-    topicCycleStatus.textContent = "Остановлен";
+    topicCycleStatus.textContent = topicCycle?.completionReason === "selected_topic_completed"
+      ? "Остановлен: выбранная тема полностью озвучена"
+      : "Остановлен";
     stopTopicCycleButton.disabled = true;
     return;
   }
 
   stopTopicCycleButton.disabled = false;
   const next = topicCycle.nextRunAt ? formatDateTime(topicCycle.nextRunAt) : "скоро";
+  const mode = topicCycle.mode === "selected-once"
+    ? `Только тема: ${topicCycle.selectedTopicName || "выбранная"}`
+    : "Все темы по кругу";
   const last = topicCycle.lastRun?.topic
     ? `Последняя: ${topicCycle.lastRun.topic} / ${topicCycle.lastRun.subtopic}`
     : "Первый выход готовится";
   const error = topicCycle.lastError ? ` Ошибка: ${topicCycle.lastError.message}` : "";
-  topicCycleStatus.textContent = `Работает. Следующий выход: ${next}. ${last}.${error}`;
+  topicCycleStatus.textContent = `Работает. ${mode}. Следующий выход: ${next}. ${last}.${error}`;
 }
 
 function formatDateTime(value) {

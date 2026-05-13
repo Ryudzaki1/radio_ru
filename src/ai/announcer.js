@@ -36,7 +36,7 @@ async function createFarewell(config) {
 }
 
 async function createFact(config, input = {}) {
-  const run = () => createFactUnlocked(config, input);
+  const run = () => withTimeout(createFactUnlocked(config, input), 180_000, "Fact generation timed out");
   factQueue = factQueue.then(run, run);
   return factQueue;
 }
@@ -202,6 +202,20 @@ function sanitizeSlug(value) {
     .trim()
     .replace(/[^\p{L}0-9]+/giu, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+async function withTimeout(promise, timeoutMs, message) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 module.exports = { createFact, createFarewell, createGreeting, createListenerQuestion };
