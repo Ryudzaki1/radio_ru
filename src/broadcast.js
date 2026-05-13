@@ -28,6 +28,8 @@ class BroadcastStream {
     this.currentPlayItem = null;
     this.currentMusic = null;
     this.running = false;
+    this.manuallyStopped = false;
+    this.loopToken = 0;
     this.currentTrackIndex = 0;
     this.currentTrackOffset = 0;
     this.audioBitrate = "192k";
@@ -46,17 +48,30 @@ class BroadcastStream {
     };
   }
 
-  start() {
+  start(options = {}) {
+    if (this.manuallyStopped && !options.force) return;
     if (this.running) return;
     this.running = true;
-    this.loop().catch((error) => {
+    const token = ++this.loopToken;
+    this.loop(token).catch((error) => {
+      if (token !== this.loopToken) return;
       console.error(`Broadcast loop stopped: ${error.message}`);
       this.running = false;
-      setTimeout(() => this.start(), 3000);
+      if (!this.manuallyStopped) setTimeout(() => this.start(), 3000);
     });
   }
 
   openClient(request, response) {
+    if (this.manuallyStopped) {
+      response.writeHead(409, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Access-Control-Allow-Origin": "*",
+      });
+      response.end("Broadcast stopped");
+      return;
+    }
+
     response.writeHead(200, streamHeaders());
 
     this.clients.add(response);
@@ -68,6 +83,15 @@ class BroadcastStream {
   }
 
   writeHead(response) {
+    if (this.manuallyStopped) {
+      response.writeHead(409, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Access-Control-Allow-Origin": "*",
+      });
+      response.end();
+      return;
+    }
     response.writeHead(200, streamHeaders());
     response.end();
   }
@@ -208,47 +232,29 @@ class BroadcastStream {
     return cleared;
   }
 
-  resetBroadcast(reason = "admin_reset") {
-    const clearedVoice = this.queue.length;
-    const clearedMusic = this.musicQueue.length + this.activeMusicItems.length;
-    this.queue = [];
-    this.musicQueue = [];
-    this.activeMusicItems = [];
-    this.activeMusicIndex = -1;
-    this.currentPlayItem = null;
-    this.currentMusic = null;
-    this.liveInterruptedForMusic = false;
-    this.interruptMusicAfterCurrent = false;
-    this.musicInterrupted = false;
-    this.voiceBridgeAfterMusicInterrupt = false;
-    this.nextVoiceAllowedAt = 0;
-    this.clearVoiceReadyInterrupt();
-    this.stopActiveProcesses();
+  restoreBroadcast(reason = "admin_restore") {
+    this.loopToken += 1;
+    const { clearedVoice, clearedMusic } = this.resetPlaybackState();
+    this.manuallyStopped = false;
+    this.running = false;
     this.updateStatus({
-      mode: "resetting",
-      title: "Broadcast reset",
+      mode: "restarting",
+      title: "Broadcast restarting",
       queueLength: 0,
       musicQueueLength: 0,
       musicQueue: [],
       currentPlay: null,
     });
-    this.log("broadcast_reset", { reason, clearedVoice, clearedMusic });
-    this.start();
+    this.log("broadcast_restored", { reason, clearedVoice, clearedMusic });
+    this.start({ force: true });
     return { clearedVoice, clearedMusic, stream: this.getStatus() };
   }
 
   stopBroadcast(reason = "admin_stop") {
-    const clearedVoice = this.queue.length;
-    const clearedMusic = this.musicQueue.length + this.activeMusicItems.length;
+    this.loopToken += 1;
+    const { clearedVoice, clearedMusic } = this.resetPlaybackState();
+    this.manuallyStopped = true;
     this.running = false;
-    this.queue = [];
-    this.musicQueue = [];
-    this.activeMusicItems = [];
-    this.activeMusicIndex = -1;
-    this.currentPlayItem = null;
-    this.currentMusic = null;
-    this.clearVoiceReadyInterrupt();
-    this.stopActiveProcesses();
     for (const client of this.clients) {
       client.end();
     }
@@ -265,6 +271,27 @@ class BroadcastStream {
     return { clearedVoice, clearedMusic, stream: this.getStatus() };
   }
 
+  resetPlaybackState() {
+    const clearedVoice = this.queue.length;
+    const clearedMusic = this.musicQueue.length + this.activeMusicItems.length;
+    this.queue = [];
+    this.musicQueue = [];
+    this.activeMusicItems = [];
+    this.activeMusicIndex = -1;
+    this.currentPlayItem = null;
+    this.currentMusic = null;
+    this.liveInterruptedForMusic = false;
+    this.interruptMusicAfterCurrent = false;
+    this.musicInterrupted = false;
+    this.voiceBridgeAfterMusicInterrupt = false;
+    this.nextVoiceAllowedAt = 0;
+    this.currentTrackIndex = 0;
+    this.currentTrackOffset = 0;
+    this.clearVoiceReadyInterrupt();
+    this.stopActiveProcesses();
+    return { clearedVoice, clearedMusic };
+  }
+
   stopActiveProcesses() {
     for (const process of [this.activeLiveProcess, this.activeMusicProcess]) {
       if (process && !process.killed) process.kill("SIGTERM");
@@ -276,6 +303,7 @@ class BroadcastStream {
   getStatus() {
     return {
       ...this.lastStatus,
+      stopped: this.manuallyStopped,
       listeners: this.clients.size,
       musicQueueLength: this.getPublicMusicQueueLength(),
       musicQueue: this.getPublicMusicQueue(),
@@ -316,8 +344,8 @@ class BroadcastStream {
     return result;
   }
 
-  async loop() {
-    while (this.running) {
+  async loop(token) {
+    while (this.running && token === this.loopToken) {
       const tracks = await this.readTracks();
       if (!tracks.length) {
         this.updateStatus({ mode: "waiting_music", title: "No music files", queueLength: this.queue.length });
@@ -333,6 +361,7 @@ class BroadcastStream {
 
       if (this.musicQueue.length > 0 && this.clients.size > 0) {
         await this.streamMusicQueue(tracks);
+        if (!this.running || token !== this.loopToken) break;
         this.updateStatus({ mode: "music", title: "Music playlist", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength(), musicQueue: this.getPublicMusicQueue(), currentPlay: null });
         continue;
       }
@@ -342,6 +371,7 @@ class BroadcastStream {
         const nextVoice = this.queue.shift();
         this.voiceBridgeAfterMusicInterrupt = false;
         await this.streamVoiceSegment(tracks, nextVoice, this.resolveVoiceTiming(nextVoice, 3, 3));
+        if (!this.running || token !== this.loopToken) break;
         this.nextVoiceAllowedAt = Date.now() + nextVoice.delayAfterMs;
         this.updateStatus({ mode: "music_between_voice", title: "Music between voice items", queueLength: this.queue.length, musicQueueLength: this.getPublicMusicQueueLength() });
         this.scheduleVoiceReadyInterrupt();

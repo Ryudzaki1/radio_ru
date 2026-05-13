@@ -31,7 +31,6 @@ const topicCycleModeSelectedOnce = document.querySelector("#topicCycleModeSelect
 const topicCycleModeAllLoop = document.querySelector("#topicCycleModeAllLoop");
 const archiveList = document.querySelector("#archiveList");
 const airHistory = document.querySelector("#airHistory");
-const resetBroadcastButton = document.querySelector("#resetBroadcastButton");
 const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
 const refreshArchiveButton = document.querySelector("#refreshArchiveButton");
 const clearArchiveButton = document.querySelector("#clearArchiveButton");
@@ -99,8 +98,7 @@ refreshArchiveButton?.addEventListener("click", refreshArchive);
 clearArchiveButton?.addEventListener("click", clearArchive);
 refreshListenersButton?.addEventListener("click", refreshListeners);
 resetListenersButton?.addEventListener("click", resetListeners);
-resetBroadcastButton?.addEventListener("click", resetBroadcast);
-stopBroadcastButton?.addEventListener("click", stopBroadcast);
+stopBroadcastButton?.addEventListener("click", toggleBroadcastPower);
 queueGreetingButton?.addEventListener("click", () => enqueueBroadcastAction("/api/greeting", queueGreetingButton, "Приветствие"));
 queueFactButton?.addEventListener("click", () => enqueueBroadcastAction("/api/fact", queueFactButton, "Следующая тема"));
 queueFarewellButton?.addEventListener("click", () => enqueueBroadcastAction("/api/farewell", queueFarewellButton, "Прощание"));
@@ -901,8 +899,10 @@ function renderAirHistory(items) {
     "music_synced",
     "broadcast_reset",
     "broadcast_stopped",
+    "broadcast_restored",
     "admin_broadcast_reset",
     "admin_broadcast_stop",
+    "admin_broadcast_restore",
     "topic_cycle_fact_queued",
     "topic_cycle_error",
   ]);
@@ -942,8 +942,10 @@ function getAirHistoryTitle(item) {
     music_synced: "Музыка синхронизирована",
     broadcast_reset: "Эфир сброшен",
     broadcast_stopped: "Эфир остановлен",
+    broadcast_restored: "Эфир восстановлен",
     admin_broadcast_reset: "Админ сбросил эфир",
     admin_broadcast_stop: "Админ остановил эфир",
+    admin_broadcast_restore: "Админ восстановил эфир",
     topic_cycle_fact_queued: "Тема поставлена в эфир",
     topic_cycle_error: "Ошибка автоэфира",
   }[item.event] || item.event;
@@ -958,42 +960,37 @@ function getAirHistoryMeta(item) {
     || "";
 }
 
-async function resetBroadcast() {
-  const confirmed = window.confirm("Сбросить и обновить эфир? Очереди диктора и Play-вставок будут очищены, текущий поток перезапустится.");
-  if (!confirmed) return;
-
-  resetBroadcastButton.disabled = true;
-  setStatus("Сбрасываю эфир");
-  try {
-    const response = await fetch("/api/admin/broadcast/reset", { method: "POST" });
-    const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Не удалось сбросить эфир");
-    await Promise.all([refreshAirHistory(), refreshTopicCycleStatus()]);
-    setStatus(`Эфир обновлен. Очищено: диктор ${payload.clearedVoice || 0}, музыка ${payload.clearedMusic || 0}`);
-  } catch (error) {
-    setStatus(`Сброс эфира: ошибка - ${error.message}`);
-  } finally {
-    resetBroadcastButton.disabled = false;
-  }
-}
-
-async function stopBroadcast() {
-  const confirmed = window.confirm("Остановить эфир? Активные подключения к потоку будут закрыты, очереди будут очищены.");
+async function toggleBroadcastPower() {
+  const isStopped = stopBroadcastButton?.dataset.broadcastStopped === "true";
+  const confirmed = window.confirm(isStopped
+    ? "Восстановить эфир? Очереди будут пустыми, музыка начнется с начала плейлиста."
+    : "Остановить эфир? Активные подключения к потоку будут закрыты, очереди будут очищены.");
   if (!confirmed) return;
 
   stopBroadcastButton.disabled = true;
-  setStatus("Останавливаю эфир");
+  setStatus(isStopped ? "Восстанавливаю эфир" : "Останавливаю эфир");
   try {
-    const response = await fetch("/api/admin/broadcast/stop", { method: "POST" });
+    const endpoint = isStopped ? "/api/admin/broadcast/restore" : "/api/admin/broadcast/stop";
+    const response = await fetch(endpoint, { method: "POST" });
     const payload = await response.json();
-    if (!response.ok) throw new Error(payload.error || "Не удалось остановить эфир");
+    if (!response.ok) throw new Error(payload.error || (isStopped ? "Не удалось восстановить эфир" : "Не удалось остановить эфир"));
+    setBroadcastButtonStopped(!isStopped);
+    window.dispatchEvent(new CustomEvent("broadcast-power-changed", { detail: { stopped: !isStopped } }));
     await Promise.all([refreshAirHistory(), refreshTopicCycleStatus()]);
-    setStatus("Эфир остановлен");
+    setStatus(isStopped ? "Эфир восстановлен" : "Эфир остановлен");
   } catch (error) {
-    setStatus(`Остановка эфира: ошибка - ${error.message}`);
+    setStatus(`${isStopped ? "Восстановление" : "Остановка"} эфира: ошибка - ${error.message}`);
   } finally {
     stopBroadcastButton.disabled = false;
   }
+}
+
+function setBroadcastButtonStopped(isStopped) {
+  if (!stopBroadcastButton) return;
+  stopBroadcastButton.dataset.broadcastStopped = isStopped ? "true" : "false";
+  stopBroadcastButton.textContent = isStopped ? "Восстановить эфир" : "Остановить эфир";
+  stopBroadcastButton.classList.toggle("danger-button", !isStopped);
+  stopBroadcastButton.classList.toggle("primary-action", isStopped);
 }
 
 async function clearArchive() {

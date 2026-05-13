@@ -23,6 +23,7 @@ const hostTrackTitle = document.querySelector("#hostTrackTitle");
 const nextButton = document.querySelector("#nextButton");
 const refreshButton = document.querySelector("#refreshButton");
 const syncMusicButton = document.querySelector("#syncMusicButton");
+const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
 const showAdminButton = document.querySelector("#showAdminButton");
 const themeToggle = document.querySelector("#themeToggle");
 const isAdminPage = Boolean(document.querySelector(".admin-app"));
@@ -135,6 +136,10 @@ audio?.addEventListener("stalled", () => {
 });
 
 audio?.addEventListener("error", () => {
+  if (latestStreamState.mode === "stopped") {
+    stopLocalPlayback("Эфир остановлен");
+    return;
+  }
   setStatus("Ошибка потока, переподключаюсь");
   if (streamStarted) {
     window.setTimeout(reconnectLiveStream, 1200);
@@ -142,6 +147,10 @@ audio?.addEventListener("error", () => {
 });
 
 audio?.addEventListener("ended", () => {
+  if (latestStreamState.mode === "stopped") {
+    stopLocalPlayback("Эфир остановлен");
+    return;
+  }
   setStatus("Live-поток завершился, переподключаюсь");
   if (streamStarted) {
     window.setTimeout(reconnectLiveStream, 600);
@@ -154,7 +163,23 @@ connectRadioStateEvents();
 window.setInterval(loadRadioState, 5000);
 window.setInterval(renderMusicProgress, 1000);
 
+window.addEventListener("broadcast-power-changed", (event) => {
+  const isStopped = Boolean(event.detail?.stopped);
+  latestStreamState.mode = isStopped ? "stopped" : "restarting";
+  updateBroadcastPowerButton(latestStreamState.mode);
+  if (isStopped) {
+    stopLocalPlayback("Эфир остановлен");
+  } else {
+    setStatus("Эфир восстанавливается");
+    loadRadioState();
+  }
+});
+
 async function startLiveStream() {
+  if (latestStreamState.mode === "stopped") {
+    stopLocalPlayback("Эфир остановлен. Восстановите эфир в ЛК админа.");
+    return;
+  }
   streamStarted = true;
   ensureStreamSource();
   setStatus("Подключаюсь к live-потоку");
@@ -256,6 +281,18 @@ function renderRadioState(stream, serverNow = Date.now()) {
   const musicQueueLength = Number(stream.musicQueueLength) || 0;
   const listeners = Number(stream.listeners) || 0;
 
+  updateBroadcastPowerButton(mode);
+  if (mode === "stopped") {
+    stopLocalPlayback("Эфир остановлен");
+    if (nowTitle) nowTitle.textContent = "Эфир остановлен";
+    if (nowMeta) nowMeta.textContent = "Поток отключен. Нажмите «Восстановить эфир», чтобы начать заново.";
+    if (voiceStatus) voiceStatus.textContent = "Эфир остановлен администратором";
+    renderQueuedTrackState();
+    updateHostScene(stream, mode, "Эфир остановлен");
+    renderMusicProgress();
+    return;
+  }
+
   if (nowTitle) nowTitle.textContent = title;
   if (nowMeta) {
     nowMeta.textContent = mode === "voice"
@@ -285,6 +322,7 @@ function renderRadioState(stream, serverNow = Date.now()) {
 function updateHostScene(stream, mode, title) {
   if (!hostScene) return;
 
+  const isStopped = mode === "stopped";
   const isSpeaking = mode === "voice" && Math.max(0, Number(stream.voiceStartsInMs) || 0) <= 0;
   const isVoiceMode = isSpeaking || mode === "voice_prelude" || mode === "voice_ducking";
   const isOrderedMusic = mode === "play_music" || stream.currentPlay || stream.currentMusic?.kind === "play";
@@ -300,7 +338,9 @@ function updateHostScene(stream, mode, title) {
   setHostTalking(isSpeaking);
 
   if (hostMood) {
-    hostMood.textContent = isVoiceMode
+    hostMood.textContent = isStopped
+      ? "OFF AIR"
+      : isVoiceMode
       ? "ON AIR VOICE"
       : isOrderedMusic
         ? "PLAY INSERT"
@@ -333,6 +373,27 @@ function setHostTalking(isTalking) {
   hostIsTalking = true;
   const loop = hostTalkLoops[Math.floor(Math.random() * hostTalkLoops.length)] || hostTalkLoops[0];
   hostImage.src = loop;
+}
+
+function updateBroadcastPowerButton(mode) {
+  if (!stopBroadcastButton) return;
+  const isStopped = mode === "stopped";
+  stopBroadcastButton.dataset.broadcastStopped = isStopped ? "true" : "false";
+  stopBroadcastButton.textContent = isStopped ? "Восстановить эфир" : "Остановить эфир";
+  stopBroadcastButton.classList.toggle("danger-button", !isStopped);
+  stopBroadcastButton.classList.toggle("primary-action", isStopped);
+}
+
+function stopLocalPlayback(message) {
+  streamStarted = false;
+  window.clearTimeout(stalledTimer);
+  if (audio) {
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+  }
+  if (playButton) playButton.textContent = "▶";
+  setStatus(message);
 }
 
 function preloadHostFrames() {
@@ -472,10 +533,19 @@ function renderMusicProgress() {
   const mode = latestStreamState.mode || "music";
   const music = latestStreamState.currentMusic || null;
   const isVoiceMode = mode === "voice" || mode === "voice_prelude" || mode === "voice_ducking";
+  const isStopped = mode === "stopped";
 
-  if (!music || !music.durationSeconds) {
+  if (isStopped || !music || !music.durationSeconds) {
     musicProgress.classList.add("is-empty");
     musicProgress.classList.toggle("is-voice", isVoiceMode);
+    if (isStopped) {
+      if (progressKind) progressKind.textContent = "Эфир";
+      if (progressTitle) progressTitle.textContent = "Остановлен";
+      if (progressFill) progressFill.style.width = "0%";
+      if (progressElapsed) progressElapsed.textContent = "0:00";
+      if (progressRemaining) progressRemaining.textContent = "-0:00";
+      return;
+    }
     if (progressKind) progressKind.textContent = isVoiceMode ? "Диктор" : "Музыка";
     if (progressTitle) progressTitle.textContent = isVoiceMode ? "Live-подложка готовится" : "Ожидаем данные трека";
     if (progressFill) progressFill.style.width = "0%";

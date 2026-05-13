@@ -248,21 +248,19 @@ function createServer(config) {
         return;
       }
 
-      if (request.method === "POST" && url.pathname === "/api/admin/broadcast/reset") {
-        const status = await topicCycle.stop();
-        const result = broadcast.resetBroadcast("admin_reset");
-        await emitAdmin(config, "topic-cycle", status);
-        await writeSystemLog(config, "admin_broadcast_reset", result);
-        await sendJson(response, 200, { reset: true, topicCycle: status, ...result });
-        return;
-      }
-
       if (request.method === "POST" && url.pathname === "/api/admin/broadcast/stop") {
         const status = await topicCycle.stop();
         const result = broadcast.stopBroadcast("admin_stop");
         await emitAdmin(config, "topic-cycle", status);
         await writeSystemLog(config, "admin_broadcast_stop", result);
         await sendJson(response, 200, { stopped: true, topicCycle: status, ...result });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/admin/broadcast/restore") {
+        const result = broadcast.restoreBroadcast("admin_restore");
+        await writeSystemLog(config, "admin_broadcast_restore", result);
+        await sendJson(response, 200, { restored: true, ...result });
         return;
       }
 
