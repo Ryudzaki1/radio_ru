@@ -208,6 +208,11 @@ function createServer(config) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/admin/ai-usage") {
+        await sendJson(response, 200, await getAiUsage(config));
+        return;
+      }
+
       if (request.method === "POST" && url.pathname === "/api/admin/log") {
         const body = await readJson(request).catch(() => ({}));
         await writeSystemLog(config, "admin_client_action", {
