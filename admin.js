@@ -756,6 +756,11 @@ async function startTopicCycle() {
     setStatus("Выберите тему для автоэфира");
     return;
   }
+  const order = getTopicCycleOrder() === "subtopic-first" ? "по слоям подтем" : "тема целиком";
+  const message = mode === "selected-once"
+    ? `Запустить автоэфир только для темы "${topic.name}"?\n\nПосле последней подтемы автоэфир остановится.`
+    : `Запустить автоэфир всех тем по кругу?\n\nСтарт: ${topic?.name || "первая тема"}.\nПорядок: ${order}.`;
+  if (!window.confirm(message)) return;
 
   startTopicCycleButton.disabled = true;
   setStatus(mode === "selected-once" ? `Запускаю выбранную тему: ${topic.name}` : "Запускаю все темы по кругу");
@@ -802,6 +807,7 @@ function setTopicCycleOrder(order) {
 }
 
 async function stopTopicCycle() {
+  if (!window.confirm("Остановить автоэфир тем?\n\nНовые подтемы больше не будут ставиться в очередь автоматически.")) return;
   stopTopicCycleButton.disabled = true;
   setStatus("Останавливаю автоэфир тем");
   try {
@@ -838,11 +844,25 @@ function renderTopicCycleStatus() {
     topicCycleStatus.textContent = topicCycle?.completionReason === "selected_topic_completed"
       ? "Остановлен: выбранная тема полностью озвучена"
       : "Остановлен";
-    stopTopicCycleButton.disabled = true;
+    if (startTopicCycleButton) {
+      startTopicCycleButton.hidden = false;
+      startTopicCycleButton.disabled = false;
+    }
+    if (stopTopicCycleButton) {
+      stopTopicCycleButton.hidden = true;
+      stopTopicCycleButton.disabled = true;
+    }
     return;
   }
 
-  stopTopicCycleButton.disabled = false;
+  if (startTopicCycleButton) {
+    startTopicCycleButton.hidden = true;
+    startTopicCycleButton.disabled = true;
+  }
+  if (stopTopicCycleButton) {
+    stopTopicCycleButton.hidden = false;
+    stopTopicCycleButton.disabled = false;
+  }
   const next = topicCycle.nextRunAt ? formatDateTime(topicCycle.nextRunAt) : "скоро";
   const mode = topicCycle.mode === "selected-once"
     ? `Только тема: ${topicCycle.selectedTopicName || "выбранная"}`

@@ -668,6 +668,7 @@ button:disabled {
 }
 
 .danger-button,
+.danger-action,
 #deleteTopicButton,
 #clearArchiveButton {
   color: var(--danger-text);
@@ -1111,6 +1112,17 @@ input[type="range"] {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
+}
+
+.topic-cycle-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.topic-cycle-main-action {
+  min-width: 190px;
+  min-height: 52px;
+  font-size: 15px;
 }
 
 .topic-cycle-settings {
@@ -1711,6 +1723,7 @@ html[data-theme="dark"] audio {
   .controls,
   .admin-actions,
   .topic-cycle-panel,
+  .topic-cycle-actions,
   .inline-actions {
     align-items: stretch;
     flex-direction: column;
