@@ -361,17 +361,27 @@ async function saveVoiceMusicSettings() {
 
   const nextSnapshot = getVoiceMusicSnapshot();
   if (nextSnapshot !== voiceMusicSnapshot) {
-    const confirmed = window.confirm("Сохранить изменения параметров голоса и музыки? Они сразу повлияют на следующие выходы ведущего в эфир.");
-    if (!confirmed) return;
+    const confirmed = window.confirm("Применить изменения параметров голоса и музыки? Они сразу попадут в серверный конфиг и будут использованы для следующих выходов ведущего в эфир.");
+    if (!confirmed) {
+      restoreVoiceMusicFieldsFromSnapshot();
+      setVoiceMusicLock(true);
+      setStatus("Изменения не сохранены, показаны реальные параметры");
+      return;
+    }
   }
 
   await saveConfig();
   voiceMusicSnapshot = getVoiceMusicSnapshot();
   setVoiceMusicLock(true);
+  setStatus("Параметры применены. Следующая речь ведущего возьмет новый голос и микс.");
 }
 
 function toggleVoiceMusicLock() {
   if (voiceMusicUnlocked) {
+    if (getVoiceMusicSnapshot() !== voiceMusicSnapshot) {
+      restoreVoiceMusicFieldsFromSnapshot();
+      setStatus("Изменения не сохранены, показаны реальные параметры");
+    }
     setVoiceMusicLock(true);
     return;
   }
@@ -398,6 +408,33 @@ function setVoiceMusicLock(locked) {
       ? "Параметры защищены от случайного изменения"
       : "Редактирование включено";
   }
+}
+
+function restoreVoiceMusicFieldsFromSnapshot() {
+  if (!voiceMusicSnapshot) return;
+  let snapshot;
+  try {
+    snapshot = JSON.parse(voiceMusicSnapshot);
+  } catch {
+    return;
+  }
+
+  if (currentConfig?.prompts) currentConfig.prompts.activeHostId = snapshot.activeHostId;
+  if (voiceHostSelect) voiceHostSelect.value = snapshot.activeHostId;
+  if (activeHostSelect) activeHostSelect.value = snapshot.activeHostId;
+  if (voiceInputs.model) voiceInputs.model.value = snapshot.voice.model;
+  voiceInputs.stability.value = snapshot.voice.stability;
+  voiceInputs.similarityBoost.value = snapshot.voice.similarityBoost;
+  voiceInputs.style.value = snapshot.voice.style;
+  voiceInputs.speed.value = snapshot.voice.speed;
+  voiceInputs.speakerBoost.checked = snapshot.voice.speakerBoost;
+  audioMixInputs.musicLevel.value = snapshot.audioMix.musicLevel;
+  audioMixInputs.voiceLevel.value = snapshot.audioMix.voiceLevel;
+  audioMixInputs.duckingRatio.value = snapshot.audioMix.duckingRatio;
+  audioMixInputs.preludeSeconds.value = snapshot.audioMix.preludeSeconds;
+  audioMixInputs.duckFadeSeconds.value = snapshot.audioMix.duckFadeSeconds;
+  audioMixInputs.restoreFadeSeconds.value = snapshot.audioMix.restoreFadeSeconds;
+  audioMixInputs.postludeSeconds.value = snapshot.audioMix.postludeSeconds;
 }
 
 function getVoiceMusicSnapshot() {

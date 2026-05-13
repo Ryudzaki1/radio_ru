@@ -1148,6 +1148,35 @@ input[type="range"] {
   gap: 12px;
 }
 
+.setting-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.help-tip {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  background: var(--surface);
+}
+
+.help-tip:hover,
+.help-tip:focus-visible {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .voice-controls input:disabled,
 .voice-controls select:disabled {
   opacity: 0.62;
