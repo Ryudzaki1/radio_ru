@@ -4,7 +4,7 @@ Radio runs locally at `http://localhost:3000`.
 
 The listener page is `/`. The admin page is `/admin.html` and is protected by `ADMIN_USERNAME` / `ADMIN_PASSWORD`.
 
-Listener questions are accepted only through the internal Telegram bot API. Set the same `LISTENER_API_TOKEN` for `radio` and `telegram-bot`; do not share it publicly.
+Listener questions are accepted only through the internal Telegram bot API. Set the same `LISTENER_API_TOKEN` for the Russia radio node and the Europe Telegram bot; do not share it publicly.
 
 ## Best option: Cloudflare Tunnel with your domain
 
@@ -23,10 +23,10 @@ LISTENER_API_TOKEN=your-long-random-internal-token
 docker compose --profile tunnel up -d
 ```
 
-4. Restart the bot so Telegram sends the public link:
+4. Restart the Europe bot so Telegram sends the public link:
 
 ```powershell
-docker compose up -d --build telegram-bot
+docker compose -f docker-compose.eu-bot.yml up -d --build
 ```
 
 ## Quick temporary option
@@ -45,10 +45,10 @@ PUBLIC_RADIO_URL=https://your-random-url.trycloudflare.com
 LISTENER_API_TOKEN=your-long-random-internal-token
 ```
 
-Restart the bot:
+Restart the Europe bot:
 
 ```powershell
-docker compose up -d --build telegram-bot
+docker compose -f docker-compose.eu-bot.yml up -d --build
 ```
 
 Telegram listeners will receive `PUBLIC_RADIO_URL`. They must open the link and press Play once, because browsers block audio autoplay. After that, listener questions from Telegram are emitted into the same live radio channel for admin and all connected listeners.

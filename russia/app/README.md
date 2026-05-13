@@ -1,5 +1,19 @@
 # AI Chill Radio
 
+## Production split
+
+The production setup is split intentionally:
+
+- `docker-compose.yml` starts the Russia/Yandex public radio node only: website,
+  admin panel, API, and `/stream`.
+- The Telegram bot must run on the Europe node with
+  `docker-compose.eu-bot.yml`.
+- Do not add the Telegram bot back to the default compose file on the Russia
+  node. A plain `docker compose up -d` on RU must not start Telegram traffic
+  from Russia.
+- Old VPN/Xray/OpenVPN/VLESS/VMess/Shadowsocks helpers are archived in
+  `scripts/legacy_vpn/` and are not part of the current production path.
+
 AI Chill Radio - локальная интернет-радиостанция с единым серверным аудиопотоком. Музыка играет из локальных папок, диктор генерирует текст через DeepSeek API, голос создается через ElevenLabs, а слушатели и админ слышат один и тот же live-поток `/stream`.
 
 Проект рассчитан на запуск в Docker: один контейнер ведет радиоэфир и веб-интерфейс, второй обслуживает Telegram-бота, отдельный опциональный контейнер может поднимать Cloudflare quick tunnel для временной публичной ссылки.
