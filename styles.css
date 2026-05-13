@@ -380,6 +380,23 @@ html[data-login-error="true"] .login-error {
   color: #a8ff7a;
 }
 
+.public-app .host-image,
+.public-app .host-scene.is-speaking .host-image,
+.public-app .host-onair span,
+.public-app .host-eq i,
+.public-app .host-scene.is-speaking .host-mouth,
+.public-app .host-scene.is-switching .host-button-glow,
+.public-app .host-scene.is-switching .host-card,
+.public-app .host-scene.is-switching .host-image {
+  animation: none;
+}
+
+.public-app .host-eq,
+.public-app .host-mouth,
+.public-app .host-button-glow {
+  display: none;
+}
+
 .topbar,
 .brand,
 .controls,
@@ -1081,9 +1098,7 @@ input[type="range"] {
 }
 
 .topic-cycle-panel {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
   gap: 14px;
   padding: 14px;
   border: 1px solid var(--border);
@@ -1091,11 +1106,17 @@ input[type="range"] {
   background: var(--surface-solid);
 }
 
+.topic-cycle-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
 .topic-cycle-settings {
   display: grid;
   grid-template-columns: repeat(2, minmax(130px, 1fr));
   gap: 10px;
-  min-width: 280px;
 }
 
 .topic-cycle-settings label {
@@ -1103,20 +1124,55 @@ input[type="range"] {
   gap: 5px;
 }
 
-.topic-cycle-mode {
+.topic-cycle-mode,
+.topic-cycle-order {
   display: grid;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.topic-cycle-order > strong {
+  grid-column: 1 / -1;
+}
+
+.cycle-option {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  min-height: 72px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  cursor: pointer;
+}
+
+.cycle-option:hover,
+.cycle-option:focus-within {
+  border-color: rgba(168, 255, 122, 0.55);
+}
+
+.cycle-option:has(input:checked) {
+  border-color: rgba(168, 255, 122, 0.75);
+  background: color-mix(in srgb, var(--surface-soft) 78%, rgba(168, 255, 122, 0.18));
+}
+
+.cycle-option input {
+  margin-top: 3px;
+}
+
+.cycle-option span {
+  display: grid;
+  gap: 4px;
+}
+
+.cycle-option small {
   color: var(--muted);
-  font-size: 13px;
+  line-height: 1.35;
 }
 
-.topic-cycle-mode label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.topic-cycle-panel > div:first-child {
+.topic-cycle-header > div:first-child {
   min-width: 0;
   display: grid;
   gap: 4px;
@@ -1664,7 +1720,9 @@ html[data-theme="dark"] audio {
   .prompt-grid,
   .broadcast-actions,
   .dictor-actions,
-  .topic-cycle-settings {
+  .topic-cycle-settings,
+  .topic-cycle-mode,
+  .topic-cycle-order {
     grid-template-columns: 1fr;
   }
 

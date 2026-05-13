@@ -27,6 +27,7 @@ const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
 const showAdminButton = document.querySelector("#showAdminButton");
 const themeToggle = document.querySelector("#themeToggle");
 const isAdminPage = Boolean(document.querySelector(".admin-app"));
+const isPublicPage = Boolean(document.querySelector(".public-app"));
 
 const storage = {
   volume: "ai-radio.liveVolume",
@@ -62,7 +63,7 @@ const hostTalkLoops = hostTalkFrames.slice(1);
 let hostIsTalking = false;
 
 applySavedTheme();
-preloadHostFrames();
+if (isAdminPage) preloadHostFrames();
 
 themeToggle?.addEventListener("click", () => {
   const nextTheme = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
@@ -157,11 +158,14 @@ audio?.addEventListener("ended", () => {
   }
 });
 
-loadTracks();
+if (isAdminPage) loadTracks();
 loadRadioState();
 connectRadioStateEvents();
-window.setInterval(loadRadioState, 5000);
-window.setInterval(renderMusicProgress, 1000);
+window.setInterval(loadRadioState, isPublicPage ? 15_000 : 5_000);
+window.setInterval(() => {
+  if (document.hidden && isPublicPage) return;
+  renderMusicProgress();
+}, isPublicPage ? 2_000 : 1_000);
 
 window.addEventListener("broadcast-power-changed", (event) => {
   const isStopped = Boolean(event.detail?.stopped);
@@ -361,6 +365,11 @@ function updateHostScene(stream, mode, title) {
 
 function setHostTalking(isTalking) {
   if (!hostImage) return;
+  if (isPublicPage) {
+    hostIsTalking = false;
+    hostImage.src = hostClosedFrame;
+    return;
+  }
 
   if (!isTalking) {
     if (!hostIsTalking) return;

@@ -30,6 +30,8 @@ const topicCycleMinInput = document.querySelector("#topicCycleMinInput");
 const topicCycleMaxInput = document.querySelector("#topicCycleMaxInput");
 const topicCycleModeSelectedOnce = document.querySelector("#topicCycleModeSelectedOnce");
 const topicCycleModeAllLoop = document.querySelector("#topicCycleModeAllLoop");
+const topicCycleOrderTopicFirst = document.querySelector("#topicCycleOrderTopicFirst");
+const topicCycleOrderSubtopicFirst = document.querySelector("#topicCycleOrderSubtopicFirst");
 const archiveList = document.querySelector("#archiveList");
 const airHistory = document.querySelector("#airHistory");
 const stopBroadcastButton = document.querySelector("#stopBroadcastButton");
@@ -296,6 +298,7 @@ function renderConfig(config) {
   voiceInputs.speakerBoost.checked = config.voice.speakerBoost;
   topicCycleMinInput.value = config.topicCycle?.minIntervalMinutes ?? 5;
   topicCycleMaxInput.value = config.topicCycle?.maxIntervalMinutes ?? 6;
+  setTopicCycleOrder(config.topicCycle?.order || "topic-first");
   setSyncedSliderValue("musicLevel", config.audioMix?.musicLevel ?? 0.72);
   setSyncedSliderValue("voiceLevel", config.audioMix?.voiceLevel ?? 1);
   setSyncedSliderValue("duckingRatio", config.audioMix?.duckingRatio ?? 0.18);
@@ -686,6 +689,7 @@ function collectConfig() {
     topicCycle: {
       minIntervalMinutes: Number(topicCycleMinInput.value) || 5,
       maxIntervalMinutes: Number(topicCycleMaxInput.value) || 6,
+      order: getTopicCycleOrder(),
     },
     audioMix: {
       musicLevel: getSyncedSliderNumber("musicLevel"),
@@ -762,8 +766,9 @@ async function startTopicCycle() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode,
-        topicIndex: mode === "selected-once" ? selectedTopicIndex : undefined,
+        topicIndex: selectedTopicIndex,
         subtopicIndex: 0,
+        order: getTopicCycleOrder(),
         minIntervalMs: Math.max(1, Number(topicCycleMinInput.value) || 5) * 60 * 1000,
         maxIntervalMs: Math.max(Number(topicCycleMinInput.value) || 5, Number(topicCycleMaxInput.value) || 6) * 60 * 1000,
         immediate: true,
@@ -784,6 +789,16 @@ async function startTopicCycle() {
 
 function getTopicCycleMode() {
   return topicCycleModeAllLoop?.checked ? "all-loop" : "selected-once";
+}
+
+function getTopicCycleOrder() {
+  return topicCycleOrderSubtopicFirst?.checked ? "subtopic-first" : "topic-first";
+}
+
+function setTopicCycleOrder(order) {
+  const normalized = order === "subtopic-first" ? "subtopic-first" : "topic-first";
+  if (topicCycleOrderSubtopicFirst) topicCycleOrderSubtopicFirst.checked = normalized === "subtopic-first";
+  if (topicCycleOrderTopicFirst) topicCycleOrderTopicFirst.checked = normalized !== "subtopic-first";
 }
 
 async function stopTopicCycle() {
@@ -818,6 +833,7 @@ function renderTopicCycleStatus() {
     topicCycleModeAllLoop.checked = topicCycle.mode === "all-loop";
     topicCycleModeSelectedOnce.checked = topicCycle.mode !== "all-loop";
   }
+  if (topicCycle?.order) setTopicCycleOrder(topicCycle.order);
   if (!topicCycle?.active) {
     topicCycleStatus.textContent = topicCycle?.completionReason === "selected_topic_completed"
       ? "Остановлен: выбранная тема полностью озвучена"
@@ -831,11 +847,12 @@ function renderTopicCycleStatus() {
   const mode = topicCycle.mode === "selected-once"
     ? `Только тема: ${topicCycle.selectedTopicName || "выбранная"}`
     : "Все темы по кругу";
+  const order = topicCycle.order === "subtopic-first" ? "по слоям подтем" : "тема целиком";
   const last = topicCycle.lastRun?.topic
     ? `Последняя: ${topicCycle.lastRun.topic} / ${topicCycle.lastRun.subtopic}`
     : "Первый выход готовится";
   const error = topicCycle.lastError ? ` Ошибка: ${topicCycle.lastError.message}` : "";
-  topicCycleStatus.textContent = `Работает. ${mode}. Следующий выход: ${next}. ${last}.${error}`;
+  topicCycleStatus.textContent = `Работает. ${mode}. Порядок: ${order}. Следующий выход: ${next}. ${last}.${error}`;
 }
 
 function formatDateTime(value) {

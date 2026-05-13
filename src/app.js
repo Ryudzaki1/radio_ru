@@ -487,8 +487,11 @@ function createTopicCycleController(config, broadcast) {
     selectedTopicIndex: null,
     selectedTopicName: null,
     completionReason: null,
+    order: "topic-first",
     minIntervalMs: 5 * 60_000,
     maxIntervalMs: 6 * 60_000,
+    cursorTopicIndex: 0,
+    cursorSubtopicIndex: 0,
     startedAt: null,
     nextRunAt: null,
     lastRun: null,
@@ -526,13 +529,15 @@ function createTopicCycleController(config, broadcast) {
     const mode = normalizeTopicCycleMode(input.mode);
     const selectedTopicIndex = Number.isFinite(Number(input.topicIndex))
       ? Math.max(0, Math.min(admin.topics.length - 1, Math.floor(Number(input.topicIndex))))
-      : null;
-    const selectedTopic = selectedTopicIndex === null ? null : admin.topics[selectedTopicIndex];
+      : 0;
+    const selectedTopic = admin.topics[selectedTopicIndex] || admin.topics[0] || null;
+    const subtopicIndex = Math.max(0, Math.floor(Number(input.subtopicIndex) || 0));
+    const order = normalizeTopicCycleOrder(input.order);
 
     if (selectedTopic) {
       await setCursor(config, {
         topicIndex: selectedTopicIndex,
-        subtopicIndex: Number(input.subtopicIndex) || 0,
+        subtopicIndex,
       });
     }
 
@@ -543,8 +548,11 @@ function createTopicCycleController(config, broadcast) {
       selectedTopicIndex,
       selectedTopicName: selectedTopic?.name || null,
       completionReason: null,
+      order,
       minIntervalMs: input.minIntervalMs,
       maxIntervalMs: input.maxIntervalMs,
+      cursorTopicIndex: selectedTopicIndex,
+      cursorSubtopicIndex: subtopicIndex,
       startedAt: new Date().toISOString(),
       nextRunAt: null,
       lastError: null,
@@ -555,6 +563,7 @@ function createTopicCycleController(config, broadcast) {
       mode: state.mode,
       selectedTopicIndex: state.selectedTopicIndex,
       selectedTopicName: state.selectedTopicName,
+      order: state.order,
       minIntervalMs: state.minIntervalMs,
       maxIntervalMs: state.maxIntervalMs,
     });
@@ -601,9 +610,20 @@ function createTopicCycleController(config, broadcast) {
       await writeSystemLog(config, "topic_cycle_run_started", {
         mode: state.mode,
         selectedTopicName: state.selectedTopicName,
+        order: state.order,
+        cursorTopicIndex: state.cursorTopicIndex,
+        cursorSubtopicIndex: state.cursorSubtopicIndex,
         runCount: state.runCount,
       });
-      const payload = await withTimeout(createFact(config), 180_000, "Topic cycle generation timed out");
+      const admin = await readAdminConfig(config);
+      const selection = selectTopicCycleItem(admin);
+      if (!selection) {
+        throw new Error("No topic cycle selection is available");
+      }
+      const payload = await withTimeout(createFact(config, {
+        topic: selection.topic.name,
+        subtopic: selection.subtopic,
+      }), 180_000, "Topic cycle generation timed out");
       const title = payload.subtopic ? `${payload.topic}: ${payload.subtopic}` : "Тема эфира";
       const result = await enqueueGeneratedVoice(config, broadcast, {
         ...payload,
@@ -615,6 +635,7 @@ function createTopicCycleController(config, broadcast) {
       }
       state = {
         ...state,
+        ...getAdvancedTopicCycleCursor(admin, selection),
         lastRun: {
           at: new Date().toISOString(),
           topic: payload.topic,
@@ -636,6 +657,7 @@ function createTopicCycleController(config, broadcast) {
         await writeSystemLog(config, "topic_cycle_completed", {
           mode: state.mode,
           selectedTopicName: state.selectedTopicName,
+          order: state.order,
           lastTopic: payload.topic,
           lastSubtopic: payload.subtopic,
           runCount: state.runCount,
@@ -664,6 +686,65 @@ function createTopicCycleController(config, broadcast) {
     const min = state.minIntervalMs;
     const max = Math.max(min, state.maxIntervalMs);
     return min + Math.floor(Math.random() * (max - min + 1));
+  }
+
+  function selectTopicCycleItem(admin) {
+    const topics = Array.isArray(admin.topics) ? admin.topics : [];
+    if (!topics.length) return null;
+
+    if (state.mode === "selected-once") {
+      const topicIndex = clampTopicIndex(state.selectedTopicIndex, topics);
+      const topic = topics[topicIndex];
+      if (!topic?.subtopics?.length) return null;
+      const subtopicIndex = Math.min(Math.max(0, Math.floor(Number(state.cursorSubtopicIndex) || 0)), topic.subtopics.length - 1);
+      return { topic, topicIndex, subtopic: topic.subtopics[subtopicIndex], subtopicIndex };
+    }
+
+    const maxSubtopics = Math.max(...topics.map((topic) => topic.subtopics?.length || 0), 0);
+    const guardLimit = Math.max(1, topics.length * Math.max(1, maxSubtopics) + topics.length);
+    let topicIndex = clampTopicIndex(state.cursorTopicIndex, topics);
+    let subtopicIndex = Math.max(0, Math.floor(Number(state.cursorSubtopicIndex) || 0));
+
+    for (let guard = 0; guard < guardLimit; guard += 1) {
+      const topic = topics[topicIndex];
+      if (topic?.subtopics?.[subtopicIndex]) {
+        return { topic, topicIndex, subtopic: topic.subtopics[subtopicIndex], subtopicIndex };
+      }
+      const next = getAdvancedTopicCycleCursor(admin, { topicIndex, subtopicIndex });
+      topicIndex = next.cursorTopicIndex;
+      subtopicIndex = next.cursorSubtopicIndex;
+    }
+
+    return null;
+  }
+
+  function getAdvancedTopicCycleCursor(admin, selection) {
+    const topics = Array.isArray(admin.topics) ? admin.topics : [];
+    if (!topics.length) return { cursorTopicIndex: 0, cursorSubtopicIndex: 0 };
+
+    if (state.mode !== "all-loop" || state.order === "topic-first") {
+      let topicIndex = clampTopicIndex(selection.topicIndex, topics);
+      let subtopicIndex = Math.max(0, Math.floor(Number(selection.subtopicIndex) || 0)) + 1;
+      const topic = topics[topicIndex];
+      if (subtopicIndex >= (topic?.subtopics?.length || 0)) {
+        subtopicIndex = 0;
+        topicIndex = (topicIndex + 1) % topics.length;
+      }
+      return { cursorTopicIndex: topicIndex, cursorSubtopicIndex: subtopicIndex };
+    }
+
+    const startTopicIndex = clampTopicIndex(state.selectedTopicIndex, topics);
+    const maxSubtopics = Math.max(...topics.map((topic) => topic.subtopics?.length || 0), 1);
+    let topicIndex = (clampTopicIndex(selection.topicIndex, topics) + 1) % topics.length;
+    let subtopicIndex = Math.max(0, Math.floor(Number(selection.subtopicIndex) || 0));
+    if (topicIndex === startTopicIndex) {
+      subtopicIndex = (subtopicIndex + 1) % maxSubtopics;
+    }
+    return { cursorTopicIndex: topicIndex, cursorSubtopicIndex: subtopicIndex };
+  }
+
+  function clampTopicIndex(value, topics) {
+    return Math.max(0, Math.min(topics.length - 1, Math.floor(Number(value) || 0)));
   }
 
   function clearTimer() {
@@ -704,8 +785,11 @@ function normalizeTopicCycleState(input = {}) {
     selectedTopicIndex: Number.isFinite(Number(input.selectedTopicIndex)) ? Math.max(0, Math.floor(Number(input.selectedTopicIndex))) : null,
     selectedTopicName: input.selectedTopicName ? String(input.selectedTopicName).slice(0, 160) : null,
     completionReason: input.completionReason || null,
+    order: normalizeTopicCycleOrder(input.order),
     minIntervalMs: min,
     maxIntervalMs: max,
+    cursorTopicIndex: Math.max(0, Math.floor(Number(input.cursorTopicIndex ?? input.selectedTopicIndex) || 0)),
+    cursorSubtopicIndex: Math.max(0, Math.floor(Number(input.cursorSubtopicIndex) || 0)),
     startedAt: input.startedAt || null,
     stoppedAt: input.stoppedAt || null,
     nextRunAt: input.nextRunAt || null,
@@ -717,6 +801,10 @@ function normalizeTopicCycleState(input = {}) {
 
 function normalizeTopicCycleMode(value) {
   return value === "selected-once" ? "selected-once" : "all-loop";
+}
+
+function normalizeTopicCycleOrder(value) {
+  return value === "subtopic-first" ? "subtopic-first" : "topic-first";
 }
 
 async function withTimeout(promise, timeoutMs, message) {

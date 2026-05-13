@@ -92,6 +92,7 @@ const defaultAdminConfig = {
   topicCycle: {
     minIntervalMinutes: 5,
     maxIntervalMinutes: 6,
+    order: "topic-first",
   },
 };
 
@@ -146,8 +147,13 @@ function mergeAdminConfig(input = {}) {
     topicCycle: {
       minIntervalMinutes: minTopicInterval,
       maxIntervalMinutes: Math.max(minTopicInterval, maxTopicInterval),
+      order: normalizeTopicCycleOrder(input.topicCycle?.order),
     },
   };
+}
+
+function normalizeTopicCycleOrder(value) {
+  return value === "subtopic-first" ? "subtopic-first" : "topic-first";
 }
 
 function normalizeTopicTree(value) {

@@ -740,7 +740,7 @@ class BroadcastStream {
       filterParts.push(`[${previous}][${labels[index]}]acrossfade=d=${fade.toFixed(3)}:c1=tri:c2=tri[${output}]`);
       previous = output;
     }
-    filterParts.push("[mixed]alimiter=limit=0.98[out]");
+    filterParts.push("[mixed]alimiter=limit=0.98:level=false[out]");
 
     const playInputs = [];
     for (const item of options.items) {
@@ -925,7 +925,7 @@ class BroadcastStream {
       `[playEndSrc]aformat=sample_rates=44100:channel_layouts=stereo,atrim=start=${playEndStart.toFixed(3)}:duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${fade.toFixed(3)}[playOut]`,
       `[2:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${fade.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${fade.toFixed(3)}[liveIn]`,
       `[playOut][liveIn]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0[last]`,
-      `[first][middle][last]concat=n=3:v=0:a=1,alimiter=limit=0.98[out]`,
+      `[first][middle][last]concat=n=3:v=0:a=1,alimiter=limit=0.98:level=false[out]`,
     ].join(";");
 
     const args = [
@@ -987,7 +987,7 @@ class BroadcastStream {
     const filter = [
       `[0:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${seconds.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${seconds.toFixed(3)}[from]`,
       `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${seconds.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${seconds.toFixed(3)}[to]`,
-      `[from][to]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.98[out]`,
+      `[from][to]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.98:level=false[out]`,
     ].join(";");
     const args = [
       "-hide_banner",
@@ -1025,8 +1025,9 @@ class BroadcastStream {
       : Math.max(0, Number(admin.audioMix?.postludeSeconds ?? options.postludeSeconds) || 0);
     const duckFadeSeconds = Math.max(0.2, Number(admin.audioMix?.duckFadeSeconds ?? 1.6) || 1.6);
     const restoreFadeSeconds = Math.max(0.2, Number(admin.audioMix?.restoreFadeSeconds ?? 1.4) || 1.4);
-    const duckStart = preludeSeconds;
-    const voiceStart = duckStart + duckFadeSeconds;
+    const fadeBeforeVoiceSeconds = preludeSeconds > 0 ? Math.min(duckFadeSeconds, preludeSeconds) : 0;
+    const duckStart = Math.max(0, preludeSeconds - fadeBeforeVoiceSeconds);
+    const voiceStart = preludeSeconds;
     const voiceEnd = voiceStart + voiceDuration + 0.35;
     const totalDuration = Math.max(4, voiceEnd + restoreFadeSeconds + postludeSeconds + 0.9);
     const musicBedSegments = await this.buildMusicBedSegments(tracks, totalDuration);
@@ -1037,7 +1038,9 @@ class BroadcastStream {
     const duckMusic = clamp(normalMusic * (admin.audioMix?.duckingRatio ?? 0.18));
     const volumeExpr = [
       `if(lt(t,${duckStart.toFixed(3)}),${normalMusic},`,
-      `if(lt(t,${voiceStart.toFixed(3)}),${normalMusic}-(${normalMusic}-${duckMusic})*((t-${duckStart.toFixed(3)})/${duckFadeSeconds.toFixed(3)}),`,
+      fadeBeforeVoiceSeconds > 0
+        ? `if(lt(t,${voiceStart.toFixed(3)}),${normalMusic}-(${normalMusic}-${duckMusic})*((t-${duckStart.toFixed(3)})/${fadeBeforeVoiceSeconds.toFixed(3)}),`
+        : `if(lt(t,${voiceStart.toFixed(3)}),${duckMusic},`,
       `if(lt(t,${voiceEnd.toFixed(3)}),${duckMusic},`,
       `if(lt(t,${(voiceEnd + restoreFadeSeconds).toFixed(3)}),${duckMusic}+(${normalMusic}-${duckMusic})*((t-${voiceEnd.toFixed(3)})/${restoreFadeSeconds.toFixed(3)}),${normalMusic}))))`,
     ].join("");
@@ -1045,7 +1048,7 @@ class BroadcastStream {
     const filter = [
       buildMusicBedFilter(musicBedSegments, volumeExpr),
       `[${musicBedSegments.length}:a]aformat=sample_rates=44100:channel_layouts=stereo,adelay=${Math.round(voiceStart * 1000)}|${Math.round(voiceStart * 1000)},volume=${voiceGain}[voice]`,
-      `[music][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.98[out]`,
+      `[music][voice]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.98:level=false[out]`,
     ].join(";");
 
     const musicInputs = [];
