@@ -160,7 +160,7 @@ audio?.addEventListener("ended", () => {
 
 if (isAdminPage) loadTracks();
 loadRadioState();
-connectRadioStateEvents();
+if (isAdminPage) connectRadioStateEvents();
 window.setInterval(loadRadioState, isPublicPage ? 15_000 : 5_000);
 window.setInterval(() => {
   if (document.hidden && isPublicPage) return;
