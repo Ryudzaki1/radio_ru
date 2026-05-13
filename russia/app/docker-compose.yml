@@ -17,6 +17,7 @@ services:
       LOG_DIR: /cache/logs
       ADMIN_CONFIG_PATH: /cache/config/admin.json
       FACT_LOG_PATH: /cache/config/fact-log.json
+      TOPIC_CYCLE_STATE_PATH: /cache/config/topic-cycle.json
       LISTENER_STORE_PATH: /cache/config/listeners.json
       PUBLIC_RADIO_URL: ${PUBLIC_RADIO_URL:-http://localhost:3000}
       PUBLIC_SERVER_IP: ${PUBLIC_SERVER_IP:-}

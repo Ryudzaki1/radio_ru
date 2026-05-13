@@ -85,7 +85,7 @@ async function createFactUnlocked(config, input = {}) {
   const subtopicName = selection.subtopic;
   const recentFacts = getRecentFacts(log, topicName, subtopicName, 8);
 
-  const text = await generateFact(config.deepseek, topicName, subtopicName, admin, recentFacts).catch((error) => {
+  const text = await generateFact(config.deepseek, topicName, subtopicName, admin, recentFacts, selection).catch((error) => {
     console.warn(`DeepSeek fact fallback: ${error.message}`);
     return `Факт на тему ${topicName}, ${subtopicName}: иногда самые спокойные наблюдения оказываются самыми запоминающимися.`;
   });

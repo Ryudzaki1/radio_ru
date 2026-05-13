@@ -16,6 +16,7 @@ const config = {
   logDir: resolveConfigDir(process.env.LOG_DIR, path.join(rootDir, ".cache", "logs")),
   adminConfigPath: resolveConfigFile(process.env.ADMIN_CONFIG_PATH, path.join(rootDir, ".cache", "config", "admin.json")),
   factLogPath: resolveConfigFile(process.env.FACT_LOG_PATH, path.join(rootDir, ".cache", "config", "fact-log.json")),
+  topicCycleStatePath: resolveConfigFile(process.env.TOPIC_CYCLE_STATE_PATH, path.join(rootDir, ".cache", "config", "topic-cycle.json")),
   listenerStorePath: resolveConfigFile(process.env.LISTENER_STORE_PATH, path.join(rootDir, ".cache", "config", "listeners.json")),
   publicRadioUrl: process.env.PUBLIC_RADIO_URL || `http://localhost:${process.env.PORT || 3000}`,
   listenerApiToken: process.env.LISTENER_API_TOKEN || "",
@@ -53,6 +54,7 @@ function ensureRuntimeDirs() {
   fs.mkdirSync(config.logDir, { recursive: true });
   fs.mkdirSync(path.dirname(config.adminConfigPath), { recursive: true });
   fs.mkdirSync(path.dirname(config.factLogPath), { recursive: true });
+  fs.mkdirSync(path.dirname(config.topicCycleStatePath), { recursive: true });
   fs.mkdirSync(path.dirname(config.listenerStorePath), { recursive: true });
   if (!config.listenerApiToken) {
     console.warn("LISTENER_API_TOKEN is empty. Telegram listener API is closed until the token is configured.");

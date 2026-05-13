@@ -68,16 +68,26 @@ async function advanceCursor(config, admin) {
   const subtopicIndex = current.subtopicIndex % subtopics.length;
   const subtopic = subtopics[subtopicIndex];
 
-  const next = { topicIndex: topicIndex + 1, subtopicIndex };
-  if (next.topicIndex >= topics.length) {
-    next.topicIndex = 0;
-    next.subtopicIndex = subtopicIndex + 1;
+  const next = { topicIndex, subtopicIndex: subtopicIndex + 1 };
+  if (next.subtopicIndex >= subtopics.length) {
+    next.subtopicIndex = 0;
+    next.topicIndex = topicIndex + 1;
+    if (next.topicIndex >= topics.length) {
+      next.topicIndex = 0;
+    }
   }
 
   log.cursor = next;
   await writeFactLog(config, log);
 
   return { topic, topicIndex, subtopic, subtopicIndex };
+}
+
+async function setCursor(config, cursor) {
+  const log = await readFactLog(config);
+  log.cursor = normalizeCursor(cursor);
+  await writeFactLog(config, log);
+  return log.cursor;
 }
 
 function getRecentFacts(log, topicName, subtopicName, limit = 8) {
@@ -165,4 +175,5 @@ module.exports = {
   readAvailableFactLog,
   readFactLog,
   resetFactLog,
+  setCursor,
 };

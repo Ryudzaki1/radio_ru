@@ -17,6 +17,9 @@ const subtopicList = document.querySelector("#subtopicList");
 const addTopicButton = document.querySelector("#addTopicButton");
 const addSubtopicButton = document.querySelector("#addSubtopicButton");
 const deleteTopicButton = document.querySelector("#deleteTopicButton");
+const startTopicCycleButton = document.querySelector("#startTopicCycleButton");
+const stopTopicCycleButton = document.querySelector("#stopTopicCycleButton");
+const topicCycleStatus = document.querySelector("#topicCycleStatus");
 const archiveList = document.querySelector("#archiveList");
 const refreshArchiveButton = document.querySelector("#refreshArchiveButton");
 const clearArchiveButton = document.querySelector("#clearArchiveButton");
@@ -53,6 +56,7 @@ let currentConfig = null;
 let factLog = { facts: [] };
 let archiveItems = [];
 let listenerStore = { users: [], questions: [] };
+let topicCycle = { active: false };
 let selectedTopicIndex = 0;
 let adminVoiceQueue = Promise.resolve();
 
@@ -78,6 +82,8 @@ queueAnnouncementButton?.addEventListener("click", () => enqueueBroadcastAction(
   trackTitle: announcementTrackTitle?.value || "",
 }));
 queueSelectedTopicButton?.addEventListener("click", queueSelectedTopic);
+startTopicCycleButton?.addEventListener("click", startTopicCycle);
+stopTopicCycleButton?.addEventListener("click", stopTopicCycle);
 testGreetingButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/greeting"));
 testFactButton?.addEventListener("click", () => enqueueAdminVoiceTest("/api/fact"));
 addTopicButton?.addEventListener("click", addTopic);
@@ -91,6 +97,7 @@ topicNameInput?.addEventListener("input", () => {
 
 loadConfig();
 activateTab(getInitialTab(), { persist: false });
+window.setInterval(refreshTopicCycleStatus, 30_000);
 
 async function loadConfig() {
   try {
@@ -107,6 +114,7 @@ async function loadConfig() {
     renderConfig(currentConfig);
     renderArchive();
     renderListeners();
+    await refreshTopicCycleStatus();
     connectAdminEvents();
     setStatus("Настройки загружены");
   } catch (error) {
@@ -375,6 +383,88 @@ function queueSelectedTopic() {
     topic: topic.name,
     subtopic,
   });
+}
+
+async function startTopicCycle() {
+  const topic = currentConfig?.topics?.[selectedTopicIndex];
+  if (!topic) {
+    setStatus("Выберите тему для автоэфира");
+    return;
+  }
+
+  startTopicCycleButton.disabled = true;
+  setStatus(`Запускаю автоэфир темы: ${topic.name}`);
+  try {
+    await saveConfig();
+    const response = await fetch("/api/admin/topic-cycle/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        topicIndex: selectedTopicIndex,
+        subtopicIndex: 0,
+        minIntervalMs: 5 * 60 * 1000,
+        maxIntervalMs: 6 * 60 * 1000,
+        immediate: true,
+      }),
+    });
+    topicCycle = await response.json();
+    if (!response.ok) throw new Error(topicCycle.error || "Не удалось запустить автоэфир");
+    renderTopicCycleStatus();
+    setStatus("Автоэфир тем запущен: диктор будет выходить каждые 5-6 минут");
+  } catch (error) {
+    setStatus(`Автоэфир тем: ошибка - ${error.message}`);
+  } finally {
+    startTopicCycleButton.disabled = false;
+  }
+}
+
+async function stopTopicCycle() {
+  stopTopicCycleButton.disabled = true;
+  setStatus("Останавливаю автоэфир тем");
+  try {
+    const response = await fetch("/api/admin/topic-cycle/stop", { method: "POST" });
+    topicCycle = await response.json();
+    if (!response.ok) throw new Error(topicCycle.error || "Не удалось остановить автоэфир");
+    renderTopicCycleStatus();
+    setStatus("Автоэфир тем остановлен");
+  } catch (error) {
+    setStatus(`Автоэфир тем: ошибка - ${error.message}`);
+  } finally {
+    stopTopicCycleButton.disabled = false;
+  }
+}
+
+async function refreshTopicCycleStatus() {
+  try {
+    const response = await fetch("/api/admin/topic-cycle");
+    topicCycle = response.ok ? await response.json() : { active: false };
+  } catch {
+    topicCycle = { active: false };
+  }
+  renderTopicCycleStatus();
+}
+
+function renderTopicCycleStatus() {
+  if (!topicCycleStatus) return;
+  if (!topicCycle?.active) {
+    topicCycleStatus.textContent = "Остановлен";
+    stopTopicCycleButton.disabled = true;
+    return;
+  }
+
+  stopTopicCycleButton.disabled = false;
+  const next = topicCycle.nextRunAt ? formatDateTime(topicCycle.nextRunAt) : "скоро";
+  const last = topicCycle.lastRun?.topic
+    ? `Последняя: ${topicCycle.lastRun.topic} / ${topicCycle.lastRun.subtopic}`
+    : "Первый выход готовится";
+  const error = topicCycle.lastError ? ` Ошибка: ${topicCycle.lastError.message}` : "";
+  topicCycleStatus.textContent = `Работает. Следующий выход: ${next}. ${last}.${error}`;
+}
+
+function formatDateTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "скоро";
+  return date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
 }
 
 function renderBroadcastResult(label, payload) {

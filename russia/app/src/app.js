@@ -9,7 +9,7 @@ const { pingDeepSeek } = require("./ai/deepseek");
 const { pingElevenLabs } = require("./ai/elevenlabs");
 const { readAdminConfig, writeAdminConfig } = require("./adminStore");
 const { BroadcastStream } = require("./broadcast");
-const { readAvailableFactLog, resetFactLog } = require("./factLog");
+const { readAvailableFactLog, resetFactLog, setCursor } = require("./factLog");
 const { readJson, sendFile, sendJson } = require("./http");
 const { acceptQuestion, getListenerStatus, readListenerStore, registerListener, resetListenerStore, setListenerName, updateQuestion } = require("./listenerStore");
 const { getAudioType, listTracks, resolveInside } = require("./music");
@@ -36,7 +36,11 @@ let listenerQueueVersion = 0;
 
 function createServer(config) {
   const broadcast = new BroadcastStream(config);
+  const topicCycle = createTopicCycleController(config, broadcast);
   broadcast.start();
+  topicCycle.restore().catch((error) => {
+    console.error(`Topic cycle restore failed: ${error.message}`);
+  });
   setTimeout(() => {
     recoverPendingListenerVoices(config, broadcast).catch((error) => {
       console.error(`Listener voice recovery failed: ${error.message}`);
@@ -165,6 +169,21 @@ function createServer(config) {
 
       if (request.method === "GET" && url.pathname === "/api/admin/fact-log") {
         await sendJson(response, 200, await readAvailableFactLog(config, { prune: true }));
+        return;
+      }
+
+      if (request.method === "GET" && url.pathname === "/api/admin/topic-cycle") {
+        await sendJson(response, 200, topicCycle.getStatus());
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/admin/topic-cycle/start") {
+        await sendJson(response, 200, await topicCycle.start(await readJson(request).catch(() => ({}))));
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/admin/topic-cycle/stop") {
+        await sendJson(response, 200, await topicCycle.stop());
         return;
       }
 
@@ -395,7 +414,183 @@ function enqueueListenerQuestion(config, broadcast, question) {
   );
 }
 
+function createTopicCycleController(config, broadcast) {
+  let timer = null;
+  let running = false;
+  let state = {
+    active: false,
+    minIntervalMs: 5 * 60_000,
+    maxIntervalMs: 6 * 60_000,
+    startedAt: null,
+    nextRunAt: null,
+    lastRun: null,
+    lastError: null,
+    runCount: 0,
+  };
+
+  return {
+    restore,
+    getStatus,
+    start,
+    stop,
+  };
+
+  async function restore() {
+    try {
+      const saved = JSON.parse(await fs.promises.readFile(config.topicCycleStatePath, "utf8"));
+      if (saved?.active) {
+        state = normalizeTopicCycleState(saved);
+        scheduleNext(5_000);
+      }
+    } catch {}
+  }
+
+  function getStatus() {
+    return {
+      ...state,
+      running,
+    };
+  }
+
+  async function start(input = {}) {
+    clearTimer();
+
+    if (Number.isFinite(Number(input.topicIndex))) {
+      await setCursor(config, {
+        topicIndex: Number(input.topicIndex),
+        subtopicIndex: Number(input.subtopicIndex) || 0,
+      });
+    }
+
+    state = normalizeTopicCycleState({
+      ...state,
+      active: true,
+      minIntervalMs: input.minIntervalMs,
+      maxIntervalMs: input.maxIntervalMs,
+      startedAt: new Date().toISOString(),
+      nextRunAt: null,
+      lastError: null,
+      runCount: state.runCount || 0,
+    });
+    await saveState();
+    scheduleNext(input.immediate === false ? randomInterval() : 1_000);
+    return getStatus();
+  }
+
+  async function stop() {
+    clearTimer();
+    state = {
+      ...state,
+      active: false,
+      nextRunAt: null,
+      stoppedAt: new Date().toISOString(),
+    };
+    await saveState();
+    return getStatus();
+  }
+
+  function scheduleNext(delayMs = randomInterval()) {
+    if (!state.active) return;
+    clearTimer();
+    const delay = Math.max(1_000, Math.round(delayMs));
+    state.nextRunAt = new Date(Date.now() + delay).toISOString();
+    saveState().catch(() => {});
+    timer = setTimeout(() => {
+      runOnce().catch((error) => {
+        console.error(`Topic cycle run failed: ${error.message}`);
+      });
+    }, delay);
+  }
+
+  async function runOnce() {
+    if (!state.active || running) return;
+    running = true;
+    try {
+      const payload = await createFact(config);
+      const title = payload.subtopic ? `${payload.topic}: ${payload.subtopic}` : "Тема эфира";
+      const result = await enqueueGeneratedVoice(config, broadcast, {
+        ...payload,
+        title,
+        source: "topic-cycle",
+      }, payload);
+      if (result.statusCode >= 400) {
+        throw new Error(result.body.error || "Topic cycle audio was not queued");
+      }
+      state = {
+        ...state,
+        lastRun: {
+          at: new Date().toISOString(),
+          topic: payload.topic,
+          subtopic: payload.subtopic,
+          queued: true,
+        },
+        lastError: null,
+        runCount: Number(state.runCount || 0) + 1,
+      };
+      await writeSystemLog(config, "topic_cycle_fact_queued", state.lastRun);
+    } catch (error) {
+      state = {
+        ...state,
+        lastError: {
+          at: new Date().toISOString(),
+          message: error.message,
+        },
+      };
+      await writeSystemLog(config, "topic_cycle_error", state.lastError);
+    } finally {
+      running = false;
+      await saveState();
+      if (state.active) scheduleNext();
+    }
+  }
+
+  function randomInterval() {
+    const min = state.minIntervalMs;
+    const max = Math.max(min, state.maxIntervalMs);
+    return min + Math.floor(Math.random() * (max - min + 1));
+  }
+
+  function clearTimer() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  }
+
+  async function saveState() {
+    await fs.promises.mkdir(path.dirname(config.topicCycleStatePath), { recursive: true });
+    await fs.promises.writeFile(config.topicCycleStatePath, JSON.stringify(state, null, 2), "utf8");
+  }
+}
+
+function normalizeTopicCycleState(input = {}) {
+  const min = clampCycleNumber(input.minIntervalMs, 5 * 60_000, 60_000, 24 * 60 * 60_000);
+  const max = clampCycleNumber(input.maxIntervalMs, 6 * 60_000, min, 24 * 60 * 60_000);
+  return {
+    active: Boolean(input.active),
+    minIntervalMs: min,
+    maxIntervalMs: max,
+    startedAt: input.startedAt || null,
+    stoppedAt: input.stoppedAt || null,
+    nextRunAt: input.nextRunAt || null,
+    lastRun: input.lastRun || null,
+    lastError: input.lastError || null,
+    runCount: Math.max(0, Math.floor(Number(input.runCount) || 0)),
+  };
+}
+
+function clampCycleNumber(value, fallback, min, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(max, Math.max(min, number));
+}
+
 async function sendGeneratedVoice(response, config, broadcast, event, payload) {
+  const result = await enqueueGeneratedVoice(config, broadcast, event, payload);
+  await sendJson(response, result.statusCode, result.body);
+}
+
+async function enqueueGeneratedVoice(config, broadcast, event, payload) {
   if (!payload.audioUrl) {
     const error = payload.audioError || "Voice audio was not created";
     await writeSystemLog(config, "voice_generation_failed", {
@@ -404,8 +599,7 @@ async function sendGeneratedVoice(response, config, broadcast, event, payload) {
       kind: payload.kind || null,
       error,
     });
-    await sendJson(response, 502, { ...payload, queued: false, error });
-    return;
+    return { statusCode: 502, body: { ...payload, queued: false, error } };
   }
 
   const queued = broadcast.enqueueVoice(event);
@@ -417,12 +611,11 @@ async function sendGeneratedVoice(response, config, broadcast, event, payload) {
       audioUrl: payload.audioUrl,
       error,
     });
-    await sendJson(response, 500, { ...payload, queued: false, error });
-    return;
+    return { statusCode: 500, body: { ...payload, queued: false, error } };
   }
 
   await emitRadio("voice", event);
-  await sendJson(response, 200, { ...payload, queued: true });
+  return { statusCode: 200, body: { ...payload, queued: true } };
 }
 
 async function processListenerQuestion(config, broadcast, question, queueVersion) {
