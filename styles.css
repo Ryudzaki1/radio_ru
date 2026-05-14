@@ -935,7 +935,7 @@ input[type="range"] {
 }
 
 .track span,
-.topic-pill span {
+.topic-number {
   grid-row: 1 / 3;
   color: var(--accent);
   font-weight: 800;
@@ -1208,12 +1208,37 @@ input[type="range"] {
   width: 100%;
   min-height: 62px;
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  grid-template-rows: auto auto;
-  gap: 2px 10px;
-  align-items: center;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
   text-align: left;
   transition: transform 150ms ease, border-color 150ms ease, background 150ms ease, box-shadow 150ms ease;
+}
+
+.topic-number,
+.subtopic-number {
+  min-height: 30px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.topic-pill-body {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.topic-pill strong,
+.topic-pill small {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .topic-pill.partial {
@@ -1226,9 +1251,10 @@ input[type="range"] {
   background: linear-gradient(90deg, rgba(48, 209, 88, 0.22), var(--surface-solid) 70%);
 }
 
-.topic-pill.partial span,
-.topic-pill.complete span {
+.topic-pill.partial .topic-number,
+.topic-pill.complete .topic-number {
   color: var(--success-text);
+  background: rgba(48, 209, 88, 0.15);
 }
 
 .topic-detail {
@@ -1240,18 +1266,18 @@ input[type="range"] {
 
 .subtopic-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: 1fr;
   gap: 10px;
 }
 
 .subtopic-chip {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto 34px;
-  align-items: center;
+  grid-template-columns: 44px minmax(0, 1fr) auto 34px;
+  align-items: start;
   gap: 8px;
   min-width: 0;
-  padding: 7px;
+  padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-solid);
@@ -1297,20 +1323,24 @@ input[type="range"] {
   width: 8px;
   height: 8px;
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 7px;
+  left: 7px;
   border-radius: 50%;
   background: var(--mint);
 }
 
-.subtopic-chip input {
-  min-height: 34px;
+.subtopic-chip textarea {
+  width: 100%;
+  min-height: 58px;
   min-width: 0;
+  resize: vertical;
   border: 0;
   background: transparent;
   color: var(--text);
   outline: none;
-  padding-left: 12px;
+  line-height: 1.45;
+  padding: 3px 2px;
+  overflow-wrap: anywhere;
 }
 
 .subtopic-chip button {

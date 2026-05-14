@@ -327,8 +327,21 @@ function renderTopicList() {
     button.classList.toggle("active", index === selectedTopicIndex);
     button.classList.toggle("partial", savedCount > 0 && savedCount < topic.subtopics.length);
     button.classList.toggle("complete", savedCount === topic.subtopics.length && topic.subtopics.length > 0);
-    button.innerHTML = `<span>${String(index + 1).padStart(2, "0")}</span><strong></strong><small>${savedCount}/${topic.subtopics.length} mp3 сохранено</small>`;
-    button.querySelector("strong").textContent = topic.name || "Новая тема";
+    const number = document.createElement("span");
+    number.className = "topic-number";
+    number.textContent = String(index + 1).padStart(2, "0");
+
+    const body = document.createElement("span");
+    body.className = "topic-pill-body";
+
+    const title = document.createElement("strong");
+    title.textContent = topic.name || "Новая тема";
+
+    const meta = document.createElement("small");
+    meta.textContent = `${savedCount}/${topic.subtopics.length} mp3 сохранено`;
+
+    body.append(title, meta);
+    button.append(number, body);
     button.addEventListener("click", () => {
       selectedTopicIndex = index;
       localStorage.setItem(adminUiStorage.topicIndex, String(index));
@@ -393,11 +406,16 @@ function renderTopicDetail() {
     item.classList.toggle("voiced", voiced.subtopics.has(key));
     item.classList.toggle("saved", saved);
 
-    const input = document.createElement("input");
-    input.type = "text";
+    const number = document.createElement("span");
+    number.className = "subtopic-number";
+    number.textContent = String(index + 1).padStart(2, "0");
+
+    const input = document.createElement("textarea");
+    input.rows = getSubtopicTextareaRows(subtopic);
     input.value = subtopic;
     input.addEventListener("input", () => {
       topic.subtopics[index] = input.value;
+      input.rows = getSubtopicTextareaRows(input.value);
     });
 
     const state = document.createElement("span");
@@ -415,9 +433,14 @@ function renderTopicDetail() {
       renderTopicList();
     });
 
-    item.append(input, state, remove);
+    item.append(number, input, state, remove);
     subtopicList.append(item);
   });
+}
+
+function getSubtopicTextareaRows(value) {
+  const length = String(value || "").length;
+  return Math.min(6, Math.max(2, Math.ceil(length / 90)));
 }
 
 function renderArchive() {
@@ -477,6 +500,10 @@ function deleteSelectedTopic() {
     setStatus("Нужна хотя бы одна тема");
     return;
   }
+
+  const topic = currentConfig.topics[selectedTopicIndex];
+  const confirmed = window.confirm(`Удалить выбранную тему из редактора?\n\n${topic?.name || "Без названия"}\n\nИзменение попадет на сервер после кнопки «Сохранить изменения тем».`);
+  if (!confirmed) return;
 
   currentConfig.topics.splice(selectedTopicIndex, 1);
   selectedTopicIndex = Math.max(0, selectedTopicIndex - 1);
@@ -742,6 +769,10 @@ function queueSelectedTopic() {
     setStatus("У выбранной темы нет подтем");
     return;
   }
+
+  const saved = voiced.savedSubtopics.has(getPairKey(topic.name, subtopic));
+  const confirmed = window.confirm(`Поставить в эфир подтему?\n\nТема: ${topic.name}\nПодтема: ${subtopic}\n\n${saved ? "mp3 уже сохранен, токены не тратятся." : "mp3 еще нет, при генерации будут потрачены токены."}`);
+  if (!confirmed) return;
 
   enqueueBroadcastAction("/api/fact", queueSelectedTopicButton, `${topic.name}: ${subtopic}`, {
     topic: topic.name,
