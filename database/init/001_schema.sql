@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS system_events (
 
 CREATE TABLE IF NOT EXISTS broadcast_events (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_key TEXT UNIQUE,
+  event_key TEXT NOT NULL UNIQUE,
   event TEXT NOT NULL,
   category TEXT NOT NULL DEFAULT 'system' CHECK (category IN ('live_music', 'play_music', 'voice', 'transition', 'queue', 'system')),
   status TEXT NOT NULL DEFAULT 'observed' CHECK (status IN ('queued', 'started', 'ended', 'failed', 'cancelled', 'observed')),
