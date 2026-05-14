@@ -533,6 +533,12 @@ class BroadcastStream {
           durationSeconds: currentDuration,
           positionSeconds: playStart,
         });
+        this.log("play_music_start", {
+          file: current.file,
+          title: current.title,
+          durationSeconds: currentDuration,
+          positionSeconds: playStart,
+        });
         await this.streamSingleMusic(current.musicPath, playStart, middleDuration, current.title);
       }
 
@@ -821,6 +827,13 @@ class BroadcastStream {
       title: track.title,
       durationSeconds: trackDuration,
       positionSeconds: segmentStartOffset,
+    });
+    this.log("live_music_start", {
+      file: track.file,
+      title: track.title,
+      durationSeconds: trackDuration,
+      positionSeconds: segmentStartOffset,
+      trackIndex: this.currentTrackIndex,
     });
     this.activeLiveSegment = {
       trackIndex: this.currentTrackIndex,

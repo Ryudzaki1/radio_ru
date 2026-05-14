@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { recordBroadcastEvent, recordSystemEvent } = require("./database");
 
 const RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 let cleanupDueAt = 0;
@@ -19,6 +20,8 @@ async function writeSystemLog(config, event, data = {}) {
   try {
     await fs.promises.mkdir(logDir, { recursive: true });
     await fs.promises.appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+    recordSystemEvent(config, entry).catch((error) => console.warn(`system event db log failed: ${error.message}`));
+    recordBroadcastEvent(config, entry).catch((error) => console.warn(`broadcast event db log failed: ${error.message}`));
     if (Date.now() >= cleanupDueAt) {
       cleanupDueAt = Date.now() + 60 * 60 * 1000;
       cleanupOldLogs(logDir).catch(() => {});

@@ -28,8 +28,28 @@ proper migration command later.
 - `audio_assets` - generated mp3 files and their metadata.
 - `broadcast_jobs` - future durable queue for voice, music, topic, and listener
   jobs.
+- `broadcast_events` - chronological live-air history: live tracks, play
+  inserts, voice starts/ends, transitions, broadcast stop/restore events.
 - `ai_usage_events` - DeepSeek and ElevenLabs usage accounting.
 - `system_events` - audit trail for admin, bot, listener, and system actions.
+
+## Broadcast event relationships
+
+`broadcast_events` is the main table for "what was on air". It stores the
+event time, category, title, source file, duration, topic/subtopic text and
+metadata.
+
+Optional links are already reserved:
+
+- `listener_question_id` -> `listener_questions.id` for paid listener
+  questions.
+- `audio_asset_id` -> `audio_assets.id` for generated mp3 files.
+- `broadcast_job_id` -> `broadcast_jobs.id` for the future durable queue.
+
+For now, these optional IDs are usually empty because the current broadcast
+runtime still uses in-memory queues and JSON files. The table is still useful
+immediately because it is filled from the same broadcast events that feed the
+admin history.
 
 ## Recommended next tables
 

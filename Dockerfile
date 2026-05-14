@@ -11,6 +11,7 @@ ENV ADMIN_CONFIG_PATH=/cache/config/admin.json
 ENV FACT_LOG_PATH=/cache/config/fact-log.json
 
 COPY package.json ./
+RUN npm install --omit=dev
 COPY server.js index.html script.js styles.css admin-login.html admin.html admin.js ./
 COPY assets ./assets
 COPY src ./src

@@ -32,6 +32,15 @@ const config = {
     username: process.env.ADMIN_USERNAME || "admin",
     password: process.env.ADMIN_PASSWORD || "",
   },
+  database: {
+    enabled: process.env.POSTGRES_ENABLED !== "false" && Boolean(process.env.POSTGRES_PASSWORD),
+    host: process.env.POSTGRES_HOST || "postgres",
+    port: Number(process.env.POSTGRES_PORT || 5432),
+    database: process.env.POSTGRES_DB || "radio",
+    user: process.env.POSTGRES_USER || "radio",
+    password: process.env.POSTGRES_PASSWORD || "",
+    ssl: process.env.POSTGRES_SSL === "true",
+  },
   deepseek: {
     apiKey: process.env.DEEPSEEK_API_KEY || "",
     model: process.env.DEEPSEEK_MODEL || "deepseek-chat",

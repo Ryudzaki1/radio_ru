@@ -15,6 +15,8 @@ services:
     volumes:
       - radio-postgres:/var/lib/postgresql/data
       - ./database/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_HOST_PORT:-127.0.0.1:5432}:5432"
 
   radio:
     build: .
@@ -26,6 +28,11 @@ services:
       - .env
     environment:
       PORT: 3000
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-radio}
+      POSTGRES_USER: ${POSTGRES_USER:-radio}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-postgres-password}
       MUSIC_DIR: /music
       LIVE_MUSIC_DIR: /music/live
       PLAY_MUSIC_DIR: /music/play
