@@ -70,34 +70,7 @@ async function recordBroadcastEvent(config, entry) {
   const client = getPool(config);
   if (!client) return;
 
-  const result = await client.query(
-    `INSERT INTO broadcast_events (
-       event_key, event, category, status, title, source, source_file, topic, subtopic,
-       duration_seconds, position_seconds, started_at, ended_at, metadata
-     )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-     ON CONFLICT (event_key) DO NOTHING
-     RETURNING id`,
-    [
-      normalized.eventKey,
-      normalized.event,
-      normalized.category,
-      normalized.status,
-      normalized.title,
-      normalized.source,
-      normalized.sourceFile,
-      normalized.topic,
-      normalized.subtopic,
-      normalized.durationSeconds,
-      normalized.positionSeconds,
-      normalized.startedAt,
-      normalized.endedAt,
-      JSON.stringify(normalized.metadata),
-    ],
-  );
-  if (result.rows[0]?.id) {
-    await recordAirItem(client, normalized, result.rows[0].id);
-  }
+  await recordAirItem(client, normalized);
 }
 
 async function recordAirItem(client, event, broadcastEventId) {

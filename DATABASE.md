@@ -1,8 +1,9 @@
 # Database foundation
 
-PostgreSQL is added as an empty persistence layer for the future paid Telegram
-question flow. The current radio runtime does not read from or write to the
-database yet, so adding this service does not change the live broadcast logic.
+PostgreSQL is the readable admin database for the radio project and the
+foundation for the future paid Telegram question flow. The live broadcast
+continues to run from the current runtime, while the database stores a clean
+history of what was on air and important admin/system actions.
 
 ## Docker service
 
@@ -28,8 +29,9 @@ proper migration command later.
 - `audio_assets` - generated mp3 files and their metadata.
 - `broadcast_jobs` - future durable queue for voice, music, topic, and listener
   jobs.
-- `broadcast_events` - chronological live-air history: live tracks, play
-  inserts, voice starts/ends, transitions, broadcast stop/restore events.
+- `broadcast_events` - compatibility table for old technical broadcast events.
+  New routine broadcast events are intentionally kept in JSONL logs instead of
+  this table.
 - `broadcast_air_items` - clean human-readable on-air timeline. Use this table
   for admin views, reports, and "what was on air" queries.
 - `ai_usage_events` - DeepSeek and ElevenLabs usage accounting.
@@ -38,8 +40,10 @@ proper migration command later.
 
 ## Broadcast event relationships
 
-`broadcast_events` is the technical event stream. It stores raw broadcast
-events and remains useful for debugging.
+Technical broadcast steps such as voice queueing, prelude, audio start, and
+segment end are stored in JSONL logs under `/cache/logs`. They are not written
+as separate database rows, because the database is reserved for readable admin
+history.
 
 `broadcast_air_items` is the main table for "what was on air". It stores clean
 interval rows: music tracks, host voice blocks, listener questions, and system
