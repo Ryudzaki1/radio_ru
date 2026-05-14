@@ -1525,12 +1525,88 @@ input[type="range"] {
   margin-top: 4px;
 }
 
+.audio-files-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.audio-file-block {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.audio-file-block-wide {
+  grid-column: 1 / -1;
+}
+
+.upload-action {
+  position: relative;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(0, 122, 255, 0.34);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 800;
+  padding: 8px 14px;
+  white-space: nowrap;
+}
+
+.upload-action input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.audio-file-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.audio-file-row {
+  display: grid;
+  grid-template-columns: 42px minmax(180px, 1fr) minmax(180px, 280px) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-solid);
+  padding: 12px;
+}
+
+.audio-file-number {
+  color: var(--accent);
+  font-weight: 900;
+}
+
+.audio-file-row audio,
+.voice-archive-list audio {
+  width: 100%;
+}
+
 .archive-item {
   display: grid;
   grid-template-columns: minmax(220px, 1fr) minmax(220px, 360px) auto;
   gap: 12px;
   align-items: center;
   padding: 12px;
+}
+
+.voice-archive-list .archive-item {
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 360px);
 }
 
 .archive-meta {
@@ -1714,8 +1790,18 @@ html[data-theme="dark"] audio {
     grid-row: auto;
   }
 
-  .archive-item {
+  .audio-files-layout {
     grid-template-columns: 1fr;
+  }
+
+  .audio-file-row,
+  .archive-item,
+  .voice-archive-list .archive-item {
+    grid-template-columns: 1fr;
+  }
+
+  .audio-file-number {
+    display: none;
   }
 }
 

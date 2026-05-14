@@ -29,7 +29,7 @@
           <button class="admin-tab" type="button" data-tab="topics">Темы</button>
           <button class="admin-tab" type="button" data-tab="prompts">Промпты</button>
           <button class="admin-tab" type="button" data-tab="voice">Голос/Музыка</button>
-          <button class="admin-tab" type="button" data-tab="archive">Архив</button>
+          <button class="admin-tab" type="button" data-tab="archive">Аудио Файлы</button>
           <button class="admin-tab" type="button" data-tab="listeners">Слушатели</button>
           <button class="admin-tab" type="button" data-tab="tests">Тесты</button>
         </nav>
@@ -295,15 +295,52 @@
       <section class="panel admin-panel" data-panel="archive">
         <div class="section-head">
           <div>
-            <h2>Архив аудио</h2>
-            <p>Слушай и удаляй отдельные mp3 прямо из ЛК.</p>
+            <h2>Аудио файлы</h2>
+            <p>Управление музыкой эфира, ручными вставками и архивом голоса ведущего.</p>
           </div>
           <div class="inline-actions">
-            <button id="refreshArchiveButton" type="button">Обновить архив</button>
-            <button id="clearArchiveButton" class="danger-button" type="button">Удалить все архивы аудио</button>
+            <button id="refreshArchiveButton" type="button">Обновить список</button>
           </div>
         </div>
-        <div id="archiveList" class="archive-list"></div>
+        <div class="audio-files-layout">
+          <section class="audio-file-block">
+            <div class="section-head compact">
+              <div>
+                <h2>Музыка эфира</h2>
+                <p>Live эфир. Эти файлы играют автоматически по кругу.</p>
+              </div>
+              <label class="upload-action">
+                <input id="liveUploadInput" type="file" accept="audio/*" multiple>
+                <span>Загрузить</span>
+              </label>
+            </div>
+            <div id="audioLiveList" class="audio-file-list" aria-live="polite"></div>
+          </section>
+
+          <section class="audio-file-block">
+            <div class="section-head compact">
+              <div>
+                <h2>Музыка для вставки</h2>
+                <p>Play вставки. Эти файлы можно вручную поставить в эфир.</p>
+              </div>
+              <label class="upload-action">
+                <input id="playUploadInput" type="file" accept="audio/*" multiple>
+                <span>Загрузить</span>
+              </label>
+            </div>
+            <div id="audioPlayList" class="audio-file-list" aria-live="polite"></div>
+          </section>
+
+          <section class="audio-file-block audio-file-block-wide">
+            <div class="section-head compact">
+              <div>
+                <h2>Аудио ведущего</h2>
+                <p>Готовые озвучки тем, приветствий, прощаний и вопросов слушателей.</p>
+              </div>
+            </div>
+            <div id="archiveList" class="archive-list voice-archive-list"></div>
+          </section>
+        </div>
       </section>
 
       <section class="panel admin-panel" data-panel="listeners">

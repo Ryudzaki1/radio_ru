@@ -197,6 +197,11 @@ function createServer(config) {
         return;
       }
 
+      if (request.method === "GET" && url.pathname === "/api/admin/audio-files") {
+        await sendJson(response, 200, await getAudioFilesPayload(config, broadcast));
+        return;
+      }
+
       if (request.method === "GET" && url.pathname === "/api/admin/listeners") {
         await sendJson(response, 200, await readListenerStore(config));
         return;
@@ -266,6 +271,28 @@ function createServer(config) {
           tracks: result.liveTracks,
           stream: broadcast.getStatus(),
         });
+        return;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/admin/audio-files/upload") {
+        const result = await uploadMusicFiles(config, request, url.searchParams.get("kind"));
+        const sync = await broadcast.syncMusicFiles();
+        await writeSystemLog(config, "admin_audio_files_uploaded", {
+          kind: result.kind,
+          files: result.files.map((file) => file.file),
+          skipped: result.skipped,
+        });
+        await emitAdmin(config, "audio-files", await getAudioFilesPayload(config, broadcast));
+        await sendJson(response, 200, { ...result, sync });
+        return;
+      }
+
+      if (request.method === "DELETE" && url.pathname === "/api/admin/audio-files") {
+        const result = await deleteMusicFile(config, url.searchParams.get("kind"), url.searchParams.get("file"));
+        const sync = await broadcast.syncMusicFiles();
+        await writeSystemLog(config, "admin_audio_file_deleted", result);
+        await emitAdmin(config, "audio-files", await getAudioFilesPayload(config, broadcast));
+        await sendJson(response, 200, { ...result, sync });
         return;
       }
 
@@ -1205,6 +1232,33 @@ async function listArchiveItems(config) {
     .sort((a, b) => b.relativePath.localeCompare(a.relativePath, "ru", { numeric: true }));
 }
 
+async function getAudioFilesPayload(config, broadcast) {
+  const [liveTracks, playTracks, voiceArchive] = await Promise.all([
+    addTrackDurations(
+      await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" }),
+      config.liveMusicDir,
+      broadcast,
+    ),
+    addTrackDurations(
+      await listTracks(config.playMusicDir, { urlPrefix: "/music/play" }),
+      config.playMusicDir,
+      broadcast,
+    ),
+    listArchiveItems(config),
+  ]);
+
+  return {
+    liveTracks,
+    playTracks,
+    voiceArchive,
+    counts: {
+      live: liveTracks.length,
+      play: playTracks.length,
+      voice: voiceArchive.length,
+    },
+  };
+}
+
 async function listRecentRadioVoices(config, since) {
   const requestedSince = Date.parse(since || "");
   const cutoff = Number.isFinite(requestedSince)
@@ -1318,6 +1372,209 @@ async function deleteArchiveItem(config, relativePath) {
   }
 
   await fs.promises.rm(filePath, { force: true });
+}
+
+async function uploadMusicFiles(config, request, requestedKind) {
+  const kind = normalizeMusicKind(requestedKind);
+  const targetDir = kind === "live" ? config.liveMusicDir : config.playMusicDir;
+  const form = await readMultipartForm(request, { maxBytes: 500 * 1024 * 1024 });
+  const files = form.files.filter((file) => file.fieldName === "files" || file.fieldName === "file");
+  if (!files.length) {
+    const error = new Error("Audio files are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  await fs.promises.mkdir(targetDir, { recursive: true });
+  const saved = [];
+  const skipped = [];
+
+  for (const file of files) {
+    const extension = path.extname(file.fileName).toLowerCase();
+    if (!isSupportedAudioExtension(extension)) {
+      skipped.push({ file: file.fileName, reason: "Unsupported audio type" });
+      continue;
+    }
+    if (!file.content.length) {
+      skipped.push({ file: file.fileName, reason: "Empty file" });
+      continue;
+    }
+
+    const safeName = await getAvailableMusicFileName(targetDir, sanitizeAudioFileName(file.fileName, extension));
+    const targetPath = resolveInside(targetDir, safeName);
+    await fs.promises.writeFile(targetPath, file.content, { flag: "wx" });
+    saved.push({
+      file: safeName,
+      originalFile: file.fileName,
+      bytes: file.content.length,
+    });
+  }
+
+  if (!saved.length) {
+    const error = new Error(skipped[0]?.reason || "No audio files were saved");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return { ok: true, kind, files: saved, skipped };
+}
+
+async function deleteMusicFile(config, requestedKind, requestedFile) {
+  const kind = normalizeMusicKind(requestedKind);
+  const file = String(requestedFile || "").trim();
+  if (!file) {
+    const error = new Error("Audio file name is required");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!isSupportedAudioExtension(path.extname(file).toLowerCase())) {
+    const error = new Error("Only audio files can be deleted");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const targetDir = kind === "live" ? config.liveMusicDir : config.playMusicDir;
+  const filePath = resolveInside(targetDir, file);
+  await fs.promises.rm(filePath, { force: false });
+  return { ok: true, kind, file };
+}
+
+function normalizeMusicKind(value) {
+  const kind = String(value || "").trim().toLowerCase();
+  if (kind === "live" || kind === "play") return kind;
+  const error = new Error("Audio file kind must be live or play");
+  error.statusCode = 400;
+  throw error;
+}
+
+function isSupportedAudioExtension(extension) {
+  return [".mp3", ".wav", ".ogg", ".m4a", ".aac", ".flac"].includes(String(extension || "").toLowerCase());
+}
+
+function sanitizeAudioFileName(fileName, fallbackExtension) {
+  const originalBase = path.basename(String(fileName || ""));
+  const extension = path.extname(originalBase).toLowerCase() || fallbackExtension || ".mp3";
+  const rawName = path.basename(originalBase, path.extname(originalBase));
+  const safeBase = rawName
+    .normalize("NFC")
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+  return `${safeBase || `audio-${Date.now()}`}${extension}`;
+}
+
+async function getAvailableMusicFileName(targetDir, fileName) {
+  const extension = path.extname(fileName);
+  const base = path.basename(fileName, extension);
+  let candidate = fileName;
+  for (let index = 2; index < 1000; index += 1) {
+    try {
+      await fs.promises.access(path.join(targetDir, candidate));
+      candidate = `${base}-${index}${extension}`;
+    } catch {
+      return candidate;
+    }
+  }
+  const error = new Error("Could not create unique file name");
+  error.statusCode = 409;
+  throw error;
+}
+
+async function readMultipartForm(request, options = {}) {
+  const contentType = request.headers["content-type"] || "";
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
+  if (!boundaryMatch) {
+    const error = new Error("Multipart boundary is required");
+    error.statusCode = 400;
+    throw error;
+  }
+  const boundary = Buffer.from(`--${boundaryMatch[1] || boundaryMatch[2]}`);
+  const body = await readRawBody(request, options.maxBytes || 50 * 1024 * 1024);
+  const files = [];
+  const fields = {};
+
+  let cursor = body.indexOf(boundary);
+  while (cursor !== -1) {
+    cursor += boundary.length;
+    if (body[cursor] === 45 && body[cursor + 1] === 45) break;
+    if (body[cursor] === 13 && body[cursor + 1] === 10) cursor += 2;
+
+    const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), cursor);
+    if (headerEnd === -1) break;
+    const headerText = body.subarray(cursor, headerEnd).toString("latin1");
+    const nextBoundary = body.indexOf(boundary, headerEnd + 4);
+    if (nextBoundary === -1) break;
+
+    let content = body.subarray(headerEnd + 4, nextBoundary);
+    if (content.length >= 2 && content[content.length - 2] === 13 && content[content.length - 1] === 10) {
+      content = content.subarray(0, content.length - 2);
+    }
+
+    const disposition = headerText.match(/content-disposition:[^\r\n]+/i)?.[0] || "";
+    const dispositionParams = parseContentDispositionParams(disposition);
+    const name = dispositionParams.name || "";
+    const filename = dispositionParams["filename*"] || dispositionParams.filename || "";
+    if (filename) {
+      files.push({
+        fieldName: name,
+        fileName: decodeMultipartFileName(filename, Boolean(dispositionParams["filename*"])),
+        content,
+      });
+    } else if (name) {
+      fields[name] = content.toString("utf8");
+    }
+
+    cursor = nextBoundary;
+  }
+
+  return { fields, files };
+}
+
+function parseContentDispositionParams(disposition) {
+  const params = {};
+  const parts = String(disposition || "").split(";");
+  for (const part of parts.slice(1)) {
+    const separator = part.indexOf("=");
+    if (separator < 0) continue;
+    const key = part.slice(0, separator).trim().toLowerCase();
+    let value = part.slice(separator + 1).trim();
+    if (value.startsWith('"') && value.endsWith('"')) {
+      value = value.slice(1, -1).replace(/\\"/g, '"');
+    }
+    params[key] = value;
+  }
+  return params;
+}
+
+function decodeMultipartFileName(value, encoded) {
+  if (!encoded) return Buffer.from(value, "latin1").toString("utf8");
+  const match = String(value).match(/^([^']*)'[^']*'(.*)$/);
+  const charset = (match?.[1] || "utf-8").toLowerCase();
+  const encodedName = match?.[2] || value;
+  try {
+    const decoded = decodeURIComponent(encodedName);
+    return charset === "utf-8" || charset === "utf8"
+      ? decoded
+      : Buffer.from(decoded, "binary").toString("utf8");
+  } catch {
+    return Buffer.from(String(value), "latin1").toString("utf8");
+  }
+}
+
+async function readRawBody(request, maxBytes) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maxBytes) {
+      const error = new Error("Request body is too large");
+      error.statusCode = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
 }
 
 async function findPlayableTrack(config, file) {

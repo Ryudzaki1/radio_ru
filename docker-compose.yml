@@ -55,7 +55,7 @@ services:
       LISTENER_ADMIN_TELEGRAM_IDS: ${LISTENER_ADMIN_TELEGRAM_IDS:-}
       LISTENER_ADMIN_USERNAMES: ${LISTENER_ADMIN_USERNAMES:-}
     volumes:
-      - ./music:/music:ro
+      - ./music:/music
       - radio-cache:/cache
 
   tunnel:
