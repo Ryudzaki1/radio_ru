@@ -75,6 +75,8 @@ async function recordBroadcastEvent(config, entry) {
 
 async function recordAirItem(client, event, broadcastEventId) {
   if (event.event === "live_music_start") {
+    await finishOpenAirItems(client, "host_voice", event.startedAt, ["started"]);
+    await finishOpenAirItems(client, "listener_question", event.startedAt, ["started"]);
     await finishOpenAirItems(client, "live_track", event.startedAt, ["started"]);
     await insertAirItem(client, {
       itemKey: `live:${event.eventKey}`,
@@ -96,6 +98,8 @@ async function recordAirItem(client, event, broadcastEventId) {
   }
 
   if (event.event === "play_music_start") {
+    await finishOpenAirItems(client, "host_voice", event.startedAt, ["started"]);
+    await finishOpenAirItems(client, "listener_question", event.startedAt, ["started"]);
     await finishOpenAirItems(client, "play_track", event.startedAt, ["started"]);
     await insertAirItem(client, {
       itemKey: `play:${event.eventKey}`,
