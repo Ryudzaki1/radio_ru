@@ -63,7 +63,8 @@ paid-question and durable-queue migration.
 Paid Telegram questions are now written into the readable database as well as
 the runtime JSON store:
 
-- `listener_questions.external_question_id` stores the runtime question id;
+- `listener_questions.external_question_id` stores the runtime question id and
+  has a full unique index for idempotent sync;
 - `payment_orders.provider_payload` stores the invoice payload
   `question:<external_question_id>`;
 - `payments.provider_charge_id` stores Telegram's successful payment charge id.
