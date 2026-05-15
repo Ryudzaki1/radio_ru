@@ -21,7 +21,7 @@ def load_key(path):
 script = f"""
 set -euo pipefail
 cd /opt/radio_ru
-docker compose up -d --build ru postgres
+docker compose up -d --build ru ru-postgres
 
 cat > /etc/caddy/Caddyfile <<'EOF'
 :80 {{

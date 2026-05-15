@@ -12,7 +12,7 @@ Responsibilities:
 - local music storage under `music/live` and `music/play`;
 - private WireGuard listener API at `http://10.77.0.2:18082`.
 
-The Russia node runs only the Docker services `ru` and `postgres`.
+The Russia node runs only the Docker services `ru` and `ru-postgres`.
 
 Do not run Telegram from the Russia node. The default `docker-compose.yml` is
 kept RU-only so a plain `docker compose up -d` cannot accidentally start
