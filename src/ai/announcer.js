@@ -45,7 +45,8 @@ async function createFactUnlocked(config, input = {}) {
   const admin = await readAdminConfig(config);
   const promptSet = getActivePromptSet(admin);
   const log = await readAvailableFactLog(config, { prune: true });
-  const selection = input.topic && input.subtopic
+  const hasRequestedSelection = Boolean(input.topic || input.subtopic);
+  const selection = hasRequestedSelection
     ? resolveRequestedSelection(admin, input)
     : await advanceCursor(config, admin);
   const topicName = selection.topic.name;
@@ -181,12 +182,16 @@ function getArchivePaths(config, item) {
 function resolveRequestedSelection(admin, input) {
   const topicName = String(input.topic || "").trim();
   const subtopicName = String(input.subtopic || "").trim();
-  let topicIndex = admin.topics.findIndex((topic) => topic.name === topicName);
-  if (topicIndex < 0) topicIndex = 0;
+  const topicIndex = admin.topics.findIndex((topic) => topic.name === topicName);
+  if (topicIndex < 0) {
+    throw createSelectionError(`Topic not found: ${topicName || "<empty>"}`);
+  }
 
   const topic = admin.topics[topicIndex];
-  let subtopicIndex = topic.subtopics.findIndex((item) => item === subtopicName);
-  if (subtopicIndex < 0) subtopicIndex = 0;
+  const subtopicIndex = topic.subtopics.findIndex((item) => item === subtopicName);
+  if (subtopicIndex < 0) {
+    throw createSelectionError(`Subtopic not found for "${topic.name}": ${subtopicName || "<empty>"}`);
+  }
 
   return {
     topic,
@@ -194,6 +199,12 @@ function resolveRequestedSelection(admin, input) {
     subtopic: topic.subtopics[subtopicIndex],
     subtopicIndex,
   };
+}
+
+function createSelectionError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
 }
 
 function sanitizeSlug(value) {

@@ -180,7 +180,7 @@ function createServer(config) {
       }
 
       if (request.method === "GET" && url.pathname === "/api/admin/fact-log") {
-        await sendJson(response, 200, await readAvailableFactLog(config, { prune: true }));
+        await sendJson(response, 200, await getFactLogPayload(config));
         return;
       }
 
@@ -648,6 +648,7 @@ function createTopicCycleController(config, broadcast) {
     active: false,
     mode: "all-loop",
     selectedTopicIndex: null,
+    selectedTopicId: null,
     selectedTopicName: null,
     completionReason: null,
     order: "topic-first",
@@ -692,9 +693,19 @@ function createTopicCycleController(config, broadcast) {
     clearTimer();
     const admin = await readAdminConfig(config);
     const mode = normalizeTopicCycleMode(input.mode);
-    const selectedTopicIndex = Number.isFinite(Number(input.topicIndex))
+    const requestedTopicId = normalizeTopicId(input.topicId);
+    const requestedTopicIndex = Number.isFinite(Number(input.topicIndex))
       ? Math.max(0, Math.min(admin.topics.length - 1, Math.floor(Number(input.topicIndex))))
       : 0;
+    const topicIndexById = requestedTopicId
+      ? admin.topics.findIndex((topic) => topic.id === requestedTopicId)
+      : -1;
+    if (requestedTopicId && topicIndexById < 0) {
+      const error = new Error(`Topic not found for cycle start: ${requestedTopicId}`);
+      error.statusCode = 400;
+      throw error;
+    }
+    const selectedTopicIndex = requestedTopicId ? topicIndexById : requestedTopicIndex;
     const selectedTopic = admin.topics[selectedTopicIndex] || admin.topics[0] || null;
     const subtopicIndex = Math.max(0, Math.floor(Number(input.subtopicIndex) || 0));
     const order = normalizeTopicCycleOrder(input.order);
@@ -711,6 +722,7 @@ function createTopicCycleController(config, broadcast) {
       active: true,
       mode,
       selectedTopicIndex,
+      selectedTopicId: selectedTopic?.id || null,
       selectedTopicName: selectedTopic?.name || null,
       completionReason: null,
       order,
@@ -727,6 +739,7 @@ function createTopicCycleController(config, broadcast) {
     await writeSystemLog(config, "topic_cycle_started", {
       mode: state.mode,
       selectedTopicIndex: state.selectedTopicIndex,
+      selectedTopicId: state.selectedTopicId,
       selectedTopicName: state.selectedTopicName,
       order: state.order,
       minIntervalMs: state.minIntervalMs,
@@ -813,6 +826,7 @@ function createTopicCycleController(config, broadcast) {
     try {
       await writeSystemLog(config, "topic_cycle_run_started", {
         mode: state.mode,
+        selectedTopicId: state.selectedTopicId,
         selectedTopicName: state.selectedTopicName,
         order: state.order,
         cursorTopicIndex: state.cursorTopicIndex,
@@ -820,6 +834,21 @@ function createTopicCycleController(config, broadcast) {
         runCount: state.runCount,
       });
       const admin = await readAdminConfig(config);
+      if (state.mode === "selected-once" && !findSelectedTopic(admin)) {
+        state = {
+          ...state,
+          active: false,
+          nextRunAt: null,
+          stoppedAt: new Date().toISOString(),
+          completionReason: "selected_topic_missing",
+        };
+        await writeSystemLog(config, "topic_cycle_selected_topic_missing", {
+          selectedTopicId: state.selectedTopicId,
+          selectedTopicName: state.selectedTopicName,
+          runCount: state.runCount,
+        });
+        return;
+      }
       const selection = selectTopicCycleItem(admin);
       if (!selection) {
         throw new Error("No topic cycle selection is available");
@@ -860,6 +889,7 @@ function createTopicCycleController(config, broadcast) {
         };
         await writeSystemLog(config, "topic_cycle_completed", {
           mode: state.mode,
+          selectedTopicId: state.selectedTopicId,
           selectedTopicName: state.selectedTopicName,
           order: state.order,
           lastTopic: payload.topic,
@@ -897,8 +927,9 @@ function createTopicCycleController(config, broadcast) {
     if (!topics.length) return null;
 
     if (state.mode === "selected-once") {
-      const topicIndex = clampTopicIndex(state.selectedTopicIndex, topics);
-      const topic = topics[topicIndex];
+      const selected = findSelectedTopicEntry(admin);
+      if (!selected) return null;
+      const { topic, topicIndex } = selected;
       if (!topic?.subtopics?.length) return null;
       const subtopicIndex = Math.min(Math.max(0, Math.floor(Number(state.cursorSubtopicIndex) || 0)), topic.subtopics.length - 1);
       return { topic, topicIndex, subtopic: topic.subtopics[subtopicIndex], subtopicIndex };
@@ -937,7 +968,7 @@ function createTopicCycleController(config, broadcast) {
       return { cursorTopicIndex: topicIndex, cursorSubtopicIndex: subtopicIndex };
     }
 
-    const startTopicIndex = clampTopicIndex(state.selectedTopicIndex, topics);
+    const startTopicIndex = resolveSelectedTopicIndex(admin, topics);
     const maxSubtopics = Math.max(...topics.map((topic) => topic.subtopics?.length || 0), 1);
     let topicIndex = (clampTopicIndex(selection.topicIndex, topics) + 1) % topics.length;
     let subtopicIndex = Math.max(0, Math.floor(Number(selection.subtopicIndex) || 0));
@@ -968,10 +999,27 @@ function createTopicCycleController(config, broadcast) {
   }
 
   function findSelectedTopic(admin) {
+    return findSelectedTopicEntry(admin)?.topic || null;
+  }
+
+  function findSelectedTopicEntry(admin) {
     const topics = Array.isArray(admin.topics) ? admin.topics : [];
-    return topics.find((topic) => topic.name === state.selectedTopicName)
-      || topics[state.selectedTopicIndex]
-      || null;
+    const byId = state.selectedTopicId
+      ? topics.findIndex((topic) => topic.id === state.selectedTopicId)
+      : -1;
+    if (byId >= 0) return { topic: topics[byId], topicIndex: byId };
+
+    const byName = state.selectedTopicName
+      ? topics.findIndex((topic) => topic.name === state.selectedTopicName)
+      : -1;
+    if (byName >= 0) return { topic: topics[byName], topicIndex: byName };
+
+    return null;
+  }
+
+  function resolveSelectedTopicIndex(admin, topics) {
+    return findSelectedTopicEntry(admin)?.topicIndex
+      ?? clampTopicIndex(state.selectedTopicIndex, topics);
   }
 
   async function saveState() {
@@ -987,6 +1035,7 @@ function normalizeTopicCycleState(input = {}) {
     active: Boolean(input.active),
     mode: normalizeTopicCycleMode(input.mode),
     selectedTopicIndex: Number.isFinite(Number(input.selectedTopicIndex)) ? Math.max(0, Math.floor(Number(input.selectedTopicIndex))) : null,
+    selectedTopicId: normalizeTopicId(input.selectedTopicId),
     selectedTopicName: input.selectedTopicName ? String(input.selectedTopicName).slice(0, 160) : null,
     completionReason: input.completionReason || null,
     order: normalizeTopicCycleOrder(input.order),
@@ -1009,6 +1058,16 @@ function normalizeTopicCycleMode(value) {
 
 function normalizeTopicCycleOrder(value) {
   return value === "subtopic-first" ? "subtopic-first" : "topic-first";
+}
+
+function normalizeTopicId(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return normalized || null;
 }
 
 async function withTimeout(promise, timeoutMs, message) {
@@ -1333,7 +1392,14 @@ async function emitAdmin(config, event, data) {
 }
 
 async function emitFactState(config) {
-  await emitAdmin(config, "fact-log", await readAvailableFactLog(config, { prune: true }));
+  await emitAdmin(config, "fact-log", await getFactLogPayload(config));
+}
+
+async function getFactLogPayload(config) {
+  return {
+    ...(await readAvailableFactLog(config, { prune: true })),
+    activeVoiceId: config.elevenlabs.voiceId || null,
+  };
 }
 
 async function emitRadio(event, data) {

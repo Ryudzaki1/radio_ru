@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 const DEFAULT_HOST_ID = "sweetiefox";
 const promptKinds = ["greeting", "fact", "listener", "farewell"];
@@ -66,7 +67,7 @@ const curatedTopicTree = [
 
 const defaultAdminConfig = {
   stationName: "AI Chill Radio",
-  topics: curatedTopicTree.map(([name, subtopics]) => ({ name, subtopics })),
+  topics: curatedTopicTree.map(([name, subtopics]) => ({ id: createTopicId(name), name, subtopics })),
   prompts: defaultPromptConfig,
   voice: {
     model: "eleven_multilingual_v2",
@@ -158,13 +159,21 @@ function normalizeTopicCycleOrder(value) {
 
 function normalizeTopicTree(value) {
   const source = Array.isArray(value) ? value : defaultAdminConfig.topics;
+  const usedIds = new Set();
   const topics = source.map((item) => {
     if (typeof item === "string") {
-      return { name: item, subtopics: defaultSubtopicsFor(item) };
+      const name = String(item).trim();
+      return {
+        id: ensureUniqueTopicId(createTopicId(name), usedIds),
+        name,
+        subtopics: defaultSubtopicsFor(item),
+      };
     }
 
+    const name = String(item?.name || "").trim();
     return {
-      name: String(item?.name || "").trim(),
+      id: ensureUniqueTopicId(normalizeTopicId(item?.id) || createTopicId(name), usedIds),
+      name,
       subtopics: normalizeSubtopics(item?.subtopics),
     };
   }).filter((item) => item.name && item.subtopics.length);
@@ -182,6 +191,33 @@ function defaultSubtopicsFor(topic) {
   const normalized = String(topic || "").toLowerCase();
   const found = curatedTopicTree.find(([name]) => String(name).toLowerCase() === normalized);
   return found ? found[1] : ["деталь", "история", "число", "механизм", "открытие", "рекорд", "миф", "контраст", "наблюдение", "будущее"];
+}
+
+function createTopicId(value) {
+  const hash = crypto.createHash("sha1").update(String(value || "")).digest("hex").slice(0, 12);
+  return `topic-${hash}`;
+}
+
+function normalizeTopicId(value) {
+  const normalized = String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80);
+  return normalized || null;
+}
+
+function ensureUniqueTopicId(baseId, usedIds) {
+  const base = normalizeTopicId(baseId) || createTopicId("topic");
+  let candidate = base;
+  let suffix = 2;
+  while (usedIds.has(candidate)) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  usedIds.add(candidate);
+  return candidate;
 }
 
 function normalizePrompt(value, fallback) {

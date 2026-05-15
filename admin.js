@@ -745,6 +745,7 @@ function collectConfig() {
   return {
     stationName: stationNameInput.value,
     topics: currentConfig.topics.map((topic) => ({
+      id: topic.id,
       name: topic.name.trim(),
       subtopics: topic.subtopics.map((item) => item.trim()).filter(Boolean),
     })).filter((topic) => topic.name && topic.subtopics.length),
@@ -857,12 +858,14 @@ async function startTopicCycle() {
   setStatus(mode === "selected-once" ? `Запускаю выбранную тему: ${topic.name}` : "Запускаю все темы по кругу");
   try {
     await saveConfig();
+    const savedTopic = currentConfig?.topics?.[selectedTopicIndex];
     const response = await fetch("/api/admin/topic-cycle/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         mode,
         topicIndex: selectedTopicIndex,
+        topicId: savedTopic?.id || topic?.id || null,
         subtopicIndex: 0,
         order: getTopicCycleOrder(),
         minIntervalMs: Math.max(1, Number(topicCycleMinInput.value) || 5) * 60 * 1000,
@@ -934,7 +937,11 @@ function renderTopicCycleStatus() {
   if (!topicCycle?.active) {
     topicCycleStatus.textContent = topicCycle?.completionReason === "selected_topic_completed"
       ? "Остановлен: выбранная тема полностью озвучена"
-      : "Остановлен";
+      : topicCycle?.completionReason === "selected_topic_missing"
+        ? "Остановлен: выбранная тема удалена или недоступна"
+        : topicCycle?.completionReason === "broadcast_stop"
+          ? "Пауза: эфир остановлен, после восстановления цикл продолжится"
+          : "Остановлен";
     if (startTopicCycleButton) {
       startTopicCycleButton.hidden = false;
       startTopicCycleButton.disabled = false;
@@ -1369,12 +1376,15 @@ function getVoicedSets() {
   const savedSubtopics = new Set();
   const topics = new Set();
   const activeHostId = getActiveHostId();
+  const activeVoiceId = factLog.activeVoiceId || null;
   for (const fact of factLog.facts || []) {
     const factHostId = fact.hostId || "sweetiefox";
     if (factHostId !== activeHostId) continue;
     if (fact.topic) topics.add(fact.topic);
     if (fact.topic && fact.subtopic) subtopics.add(getPairKey(fact.topic, fact.subtopic));
-    if (fact.topic && fact.subtopic && fact.audioUrl) savedSubtopics.add(getPairKey(fact.topic, fact.subtopic));
+    if (fact.topic && fact.subtopic && fact.audioUrl && fact.voiceId === activeVoiceId) {
+      savedSubtopics.add(getPairKey(fact.topic, fact.subtopic));
+    }
   }
   return { topics, subtopics, savedSubtopics };
 }
