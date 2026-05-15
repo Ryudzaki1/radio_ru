@@ -67,8 +67,8 @@ the runtime JSON store:
 - `payment_orders.provider_payload` stores the invoice payload
   `question:<external_question_id>`;
 - `payments.provider_charge_id` stores Telegram's successful payment charge id.
-- `payments(provider, provider_charge_id)` has a unique index so repeated
-  Telegram payment updates remain idempotent.
+- `payments(provider, provider_charge_id)` has a full unique index so repeated
+  Telegram payment updates remain idempotent and work with `ON CONFLICT`.
 
 Useful query:
 
