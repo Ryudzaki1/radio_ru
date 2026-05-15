@@ -1,5 +1,5 @@
 services:
-  ru-postgres:
+  postgres:
     image: postgres:16-alpine
     container_name: radio-ru-postgres
     restart: unless-stopped
@@ -28,7 +28,7 @@ services:
       - .env
     environment:
       PORT: 3000
-      POSTGRES_HOST: ${POSTGRES_HOST:-ru-postgres}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
       POSTGRES_DB: ${POSTGRES_DB:-radio}
       POSTGRES_USER: ${POSTGRES_USER:-radio}

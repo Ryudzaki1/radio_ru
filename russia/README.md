@@ -7,8 +7,7 @@ Role:
 - does not run the Telegram bot container; Telegram runs on the Europe node;
 - uses the repository root as the application source;
 - stores local music under `music/live` and `music/play`;
-- calls ElevenLabs through the private EU tunnel using `ELEVENLABS_BASE_URL=http://10.77.0.1:18080`;
-- calls Telegram Bot API through the private EU tunnel using `TELEGRAM_API_BASE_URL=http://10.77.0.1:18081`.
+- calls ElevenLabs through the private EU tunnel using `ELEVENLABS_BASE_URL=http://10.77.0.1:18080`.
 
 Current test URL:
 

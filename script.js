@@ -461,29 +461,6 @@ async function insertTrack(track, item) {
   }
 }
 
-function legacyRenderQueuedTrackState() {
-  if (!playTracksEl) return;
-  const queued = Array.isArray(latestStreamState.musicQueue) ? latestStreamState.musicQueue : [];
-  const current = latestStreamState.currentPlay || null;
-  const counts = new Map();
-  for (const item of queued) {
-    counts.set(item.file, (counts.get(item.file) || 0) + 1);
-  }
-
-  playTracksEl.querySelectorAll(".track").forEach((row) => {
-    const file = row.dataset.file || "";
-    const count = counts.get(file) || 0;
-    const isCurrent = current?.file === file;
-    row.classList.toggle("queued", count > 0);
-    row.classList.toggle("on-air", isCurrent);
-    row.classList.toggle("active", count > 0 || isCurrent);
-    const badge = row.querySelector(".track-queue-badge");
-    if (badge) {
-      badge.textContent = isCurrent ? "играет" : count > 0 ? `в очереди: ${count}` : "";
-    }
-  });
-}
-
 function renderQueuedTrackState() {
   if (!playTracksEl) return;
   const queued = Array.isArray(latestStreamState.musicQueue) ? latestStreamState.musicQueue : [];
