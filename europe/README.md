@@ -8,7 +8,8 @@ Role:
 - WireGuard peer for the Russia node;
 - private Caddy reverse proxy from `http://10.77.0.1:18080` to `https://api.elevenlabs.io`;
 - private Caddy reverse proxy from `http://10.77.0.1:18081` to `https://api.telegram.org`;
-- lets the Russia node use ElevenLabs and Telegram Bot API without exposing that traffic from the Russia VM.
+- lets the Russia node use ElevenLabs without exposing that traffic from the Russia VM;
+- keeps a private Telegram API proxy available, while the active bot itself runs on the EU node.
 
 Current private network:
 
