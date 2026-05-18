@@ -1544,6 +1544,16 @@ input[type="range"] {
   padding-right: 4px;
 }
 
+.archive-footer {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .audio-files-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1633,8 +1643,12 @@ input[type="range"] {
   max-width: 360px;
 }
 
-.audio-file-row .danger-button {
+.audio-file-actions {
   grid-area: action;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
   align-self: center;
 }
 

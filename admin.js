@@ -34,6 +34,8 @@ const topicCycleModeAllLoop = document.querySelector("#topicCycleModeAllLoop");
 const topicCycleOrderTopicFirst = document.querySelector("#topicCycleOrderTopicFirst");
 const topicCycleOrderSubtopicFirst = document.querySelector("#topicCycleOrderSubtopicFirst");
 const archiveList = document.querySelector("#archiveList");
+const voiceArchiveSummary = document.querySelector("#voiceArchiveSummary");
+const loadMoreVoiceArchiveButton = document.querySelector("#loadMoreVoiceArchiveButton");
 const audioLiveList = document.querySelector("#audioLiveList");
 const audioPlayList = document.querySelector("#audioPlayList");
 const liveUploadInput = document.querySelector("#liveUploadInput");
@@ -82,7 +84,7 @@ const sliderValueInputs = {
 let currentConfig = null;
 let factLog = { facts: [] };
 let archiveItems = [];
-let audioFiles = { liveTracks: [], playTracks: [], voiceArchive: [], counts: {} };
+let audioFiles = { liveTracks: [], playTracks: [], voiceArchive: [], voiceArchivePage: {}, counts: {} };
 let listenerStore = { users: [], questions: [] };
 let topicCycle = { active: false };
 let selectedTopicIndex = 0;
@@ -104,6 +106,7 @@ saveButton?.addEventListener("click", saveVoiceMusicSettings);
 voiceMusicLockButton?.addEventListener("click", toggleVoiceMusicLock);
 refreshPromptsButton?.addEventListener("click", refreshPrompts);
 refreshArchiveButton?.addEventListener("click", refreshArchive);
+loadMoreVoiceArchiveButton?.addEventListener("click", loadMoreVoiceArchive);
 clearArchiveButton?.addEventListener("click", clearArchive);
 liveUploadInput?.addEventListener("change", () => uploadAudioFiles("live", liveUploadInput));
 playUploadInput?.addEventListener("change", () => uploadAudioFiles("play", playUploadInput));
@@ -273,7 +276,7 @@ async function loadConfig() {
     ]);
     currentConfig = await configResponse.json();
     factLog = await logResponse.json();
-    audioFiles = audioResponse.ok ? await audioResponse.json() : { liveTracks: [], playTracks: [], voiceArchive: [], counts: {} };
+    audioFiles = audioResponse.ok ? await audioResponse.json() : { liveTracks: [], playTracks: [], voiceArchive: [], voiceArchivePage: {}, counts: {} };
     archiveItems = audioFiles.voiceArchive || [];
     listenerStore = listenerResponse.ok ? await listenerResponse.json() : { users: [], questions: [] };
     renderConfig(currentConfig);
@@ -509,6 +512,7 @@ function renderArchive() {
     empty.className = "empty";
     empty.textContent = "Аудио ведущего пока нет. Новые mp3 появятся после генерации приветствий, тем, прощаний или вопросов.";
     archiveList.append(empty);
+    renderVoiceArchiveFooter();
     return;
   }
 
@@ -527,6 +531,7 @@ function renderArchive() {
     row.querySelector("audio").src = item.audioUrl;
     archiveList.append(row);
   });
+  renderVoiceArchiveFooter();
 }
 
 function renderAudioFiles() {
@@ -566,7 +571,7 @@ function renderMusicFileList(container, tracks, kind, emptyText) {
         <span></span>
       </div>
       <audio controls preload="none"></audio>
-      <button class="danger-button" type="button">Удалить</button>
+      <div class="audio-file-actions"></div>
     `;
     row.querySelector(".audio-file-number").textContent = String(index + 1).padStart(2, "0");
     row.querySelector("strong").textContent = track.title || track.file;
@@ -575,9 +580,38 @@ function renderMusicFileList(container, tracks, kind, emptyText) {
       track.durationSeconds ? formatDuration(track.durationSeconds) : "",
     ].filter(Boolean).join(" · ");
     row.querySelector("audio").src = track.url;
-    row.querySelector("button").addEventListener("click", () => deleteMusicFile(kind, track));
+    const actions = row.querySelector(".audio-file-actions");
+    if (kind === "play") {
+      const playButton = document.createElement("button");
+      playButton.className = "primary-action";
+      playButton.type = "button";
+      playButton.textContent = "В эфир";
+      playButton.addEventListener("click", () => insertPlayTrackFromAudioFiles(track, playButton));
+      actions.append(playButton);
+    }
+    const deleteButton = document.createElement("button");
+    deleteButton.className = "danger-button";
+    deleteButton.type = "button";
+    deleteButton.textContent = "Удалить";
+    if (kind === "live" && tracks.length <= 1) {
+      deleteButton.disabled = true;
+      deleteButton.title = "Нельзя удалить последний live-трек";
+    } else {
+      deleteButton.addEventListener("click", () => deleteMusicFile(kind, track));
+    }
+    actions.append(deleteButton);
     container.append(row);
   });
+}
+
+function renderVoiceArchiveFooter() {
+  if (!voiceArchiveSummary || !loadMoreVoiceArchiveButton) return;
+  const loaded = archiveItems.length;
+  const total = Number(audioFiles.counts?.voice) || loaded;
+  voiceArchiveSummary.textContent = total
+    ? `Показано ${loaded} из ${total}`
+    : "";
+  loadMoreVoiceArchiveButton.hidden = !audioFiles.voiceArchivePage?.hasMore;
 }
 
 function addTopic() {
@@ -1096,18 +1130,35 @@ async function refreshFactLog() {
   renderTopicDetail();
 }
 
-async function refreshArchive() {
-  const response = await fetch("/api/admin/audio-files");
+async function refreshArchive(options = {}) {
+  const append = Boolean(options.append);
+  const offset = append ? archiveItems.length : 0;
+  const response = await fetch(`/api/admin/audio-files?voiceOffset=${offset}&voiceLimit=80`);
   const payload = await response.json();
   if (!response.ok) {
     setStatus(payload.error || "Не удалось обновить аудио файлы");
     return;
   }
   audioFiles = payload;
-  archiveItems = payload.voiceArchive || [];
+  archiveItems = append
+    ? [...archiveItems, ...(payload.voiceArchive || [])]
+    : payload.voiceArchive || [];
+  if (append) {
+    audioFiles.voiceArchive = archiveItems;
+  }
   renderAudioFiles();
   renderArchive();
   setStatus("Аудио файлы обновлены");
+}
+
+async function loadMoreVoiceArchive() {
+  if (!audioFiles.voiceArchivePage?.hasMore) return;
+  if (loadMoreVoiceArchiveButton) loadMoreVoiceArchiveButton.disabled = true;
+  try {
+    await refreshArchive({ append: true });
+  } finally {
+    if (loadMoreVoiceArchiveButton) loadMoreVoiceArchiveButton.disabled = false;
+  }
 }
 
 async function uploadAudioFiles(kind, input) {
@@ -1150,6 +1201,26 @@ async function deleteMusicFile(kind, track) {
     setStatus("Аудио файл удален");
   } catch (error) {
     setStatus(`Удаление аудио: ошибка - ${error.message}`);
+  }
+}
+
+async function insertPlayTrackFromAudioFiles(track, button) {
+  if (button) button.disabled = true;
+  setStatus(`Ставлю Play-вставку: ${track.title || track.file}`);
+  try {
+    const response = await fetch("/api/admin/music/insert", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file: track.file }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Не удалось поставить трек в эфир");
+    if (typeof loadRadioState === "function") await loadRadioState();
+    setStatus(`Play-вставка поставлена в очередь: ${track.title || track.file}`);
+  } catch (error) {
+    setStatus(`Play-вставка: ошибка - ${error.message}`);
+  } finally {
+    if (button) button.disabled = false;
   }
 }
 
@@ -1287,6 +1358,12 @@ async function clearArchive() {
     return;
   }
   archiveItems = [];
+  audioFiles = {
+    ...audioFiles,
+    voiceArchive: [],
+    voiceArchivePage: { offset: 0, limit: 80, total: 0, hasMore: false },
+    counts: { ...(audioFiles.counts || {}), voice: 0 },
+  };
   factLog = { cursor: { topicIndex: 0, subtopicIndex: 0 }, facts: [] };
   renderArchive();
   renderTopicList();
@@ -1371,7 +1448,12 @@ function connectAdminEvents() {
     renderListeners();
   });
   events.addEventListener("archive", (event) => {
-    archiveItems = JSON.parse(event.data).items || [];
+    const payload = JSON.parse(event.data);
+    if (payload.changed) {
+      refreshArchive();
+      return;
+    }
+    archiveItems = payload.items || [];
     renderArchive();
   });
   events.addEventListener("audio-files", (event) => {

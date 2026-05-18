@@ -1,4 +1,5 @@
 const http = require("node:http");
+const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const dns = require("node:dns").promises;
 const fs = require("node:fs");
@@ -209,7 +210,10 @@ function createServer(config) {
       }
 
       if (request.method === "GET" && url.pathname === "/api/admin/audio-files") {
-        await sendJson(response, 200, await getAudioFilesPayload(config, broadcast));
+        await sendJson(response, 200, await getAudioFilesPayload(config, broadcast, {
+          voiceOffset: url.searchParams.get("voiceOffset"),
+          voiceLimit: url.searchParams.get("voiceLimit"),
+        }));
         return;
       }
 
@@ -428,7 +432,7 @@ function createServer(config) {
 
       if (request.method === "POST" && url.pathname === "/api/admin/archive/clear") {
         await resetGeneratedAudio(config);
-        await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
+        await emitAdmin(config, "archive", { changed: true });
         await sendJson(response, 200, { cleared: true });
         return;
       }
@@ -529,7 +533,7 @@ function createServer(config) {
         const event = { ...payload, title: "Тема эфира", source: "admin" };
         await sendGeneratedVoice(response, config, broadcast, event, payload);
         await emitFactState(config);
-        await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
+        await emitAdmin(config, "archive", { changed: true });
         return;
       }
 
@@ -915,7 +919,7 @@ function createTopicCycleController(config, broadcast) {
         });
       }
       await emitFactState(config);
-      await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
+      await emitAdmin(config, "archive", { changed: true });
     } catch (error) {
       state = {
         ...state,
@@ -1174,7 +1178,7 @@ async function processListenerQuestion(config, broadcast, question, queueVersion
       error: null,
     });
     await emitAdmin(config, "listeners", await readListenerStore(config));
-    await emitAdmin(config, "archive", { items: await listArchiveItems(config) });
+    await emitAdmin(config, "archive", { changed: true });
 
     const event = {
       ...payload,
@@ -1481,8 +1485,10 @@ async function listArchiveItems(config) {
     .sort((a, b) => b.relativePath.localeCompare(a.relativePath, "ru", { numeric: true }));
 }
 
-async function getAudioFilesPayload(config, broadcast) {
-  const [liveTracks, playTracks, voiceArchive] = await Promise.all([
+async function getAudioFilesPayload(config, broadcast, options = {}) {
+  const voiceOffset = clampArchiveOffset(options.voiceOffset);
+  const voiceLimit = clampArchiveLimit(options.voiceLimit);
+  const [liveTracks, playTracks, voiceArchivePage] = await Promise.all([
     addTrackDurations(
       await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" }),
       config.liveMusicDir,
@@ -1493,19 +1499,46 @@ async function getAudioFilesPayload(config, broadcast) {
       config.playMusicDir,
       broadcast,
     ),
-    listArchiveItems(config),
+    listArchiveItemsPage(config, { offset: voiceOffset, limit: voiceLimit }),
   ]);
 
   return {
     liveTracks,
     playTracks,
-    voiceArchive,
+    voiceArchive: voiceArchivePage.items,
+    voiceArchivePage: {
+      offset: voiceArchivePage.offset,
+      limit: voiceArchivePage.limit,
+      total: voiceArchivePage.total,
+      hasMore: voiceArchivePage.hasMore,
+    },
     counts: {
       live: liveTracks.length,
       play: playTracks.length,
-      voice: voiceArchive.length,
+      voice: voiceArchivePage.total,
     },
   };
+}
+
+async function listArchiveItemsPage(config, options = {}) {
+  const items = await listArchiveItems(config);
+  const offset = clampArchiveOffset(options.offset);
+  const limit = clampArchiveLimit(options.limit);
+  return {
+    items: items.slice(offset, offset + limit),
+    offset,
+    limit,
+    total: items.length,
+    hasMore: offset + limit < items.length,
+  };
+}
+
+function clampArchiveOffset(value) {
+  return Math.max(0, Math.floor(Number(value) || 0));
+}
+
+function clampArchiveLimit(value) {
+  return Math.max(1, Math.min(200, Math.floor(Number(value) || 80)));
 }
 
 async function listRecentRadioVoices(config, since) {
@@ -1626,36 +1659,37 @@ async function deleteArchiveItem(config, relativePath) {
 async function uploadMusicFiles(config, request, requestedKind) {
   const kind = normalizeMusicKind(requestedKind);
   const targetDir = kind === "live" ? config.liveMusicDir : config.playMusicDir;
-  const form = await readMultipartForm(request, { maxBytes: 500 * 1024 * 1024 });
-  const files = form.files.filter((file) => file.fieldName === "files" || file.fieldName === "file");
-  if (!files.length) {
-    const error = new Error("Audio files are required");
-    error.statusCode = 400;
-    throw error;
-  }
-
   await fs.promises.mkdir(targetDir, { recursive: true });
   const saved = [];
   const skipped = [];
+  const uploads = await streamMultipartFiles(request, targetDir, { maxBytes: 500 * 1024 * 1024 });
 
-  for (const file of files) {
-    const extension = path.extname(file.fileName).toLowerCase();
-    if (!isSupportedAudioExtension(extension)) {
-      skipped.push({ file: file.fileName, reason: "Unsupported audio type" });
+  for (const file of uploads) {
+    if (file.skipReason) {
+      skipped.push({ file: file.fileName, reason: file.skipReason });
       continue;
     }
-    if (!file.content.length) {
+    if (!file.bytes) {
+      await fs.promises.rm(file.tempPath, { force: true }).catch(() => {});
       skipped.push({ file: file.fileName, reason: "Empty file" });
       continue;
     }
 
-    const safeName = await getAvailableMusicFileName(targetDir, sanitizeAudioFileName(file.fileName, extension));
+    const probe = await probeAudioFile(file.tempPath);
+    if (!probe.ok) {
+      await fs.promises.rm(file.tempPath, { force: true }).catch(() => {});
+      skipped.push({ file: file.fileName, reason: "Invalid or unreadable audio file" });
+      continue;
+    }
+
+    const safeName = await getAvailableMusicFileName(targetDir, sanitizeAudioFileName(file.fileName, file.extension));
     const targetPath = resolveInside(targetDir, safeName);
-    await fs.promises.writeFile(targetPath, file.content, { flag: "wx" });
+    await fs.promises.rename(file.tempPath, targetPath);
     saved.push({
       file: safeName,
       originalFile: file.fileName,
-      bytes: file.content.length,
+      bytes: file.bytes,
+      durationSeconds: probe.durationSeconds,
     });
   }
 
@@ -1683,6 +1717,14 @@ async function deleteMusicFile(config, requestedKind, requestedFile) {
   }
 
   const targetDir = kind === "live" ? config.liveMusicDir : config.playMusicDir;
+  if (kind === "live") {
+    const liveTracks = await listTracks(config.liveMusicDir, { urlPrefix: "/music/live" });
+    if (liveTracks.length <= 1) {
+      const error = new Error("At least one live music file must remain");
+      error.statusCode = 409;
+      throw error;
+    }
+  }
   const filePath = resolveInside(targetDir, file);
   await fs.promises.rm(filePath, { force: false });
   return { ok: true, kind, file };
@@ -1730,7 +1772,7 @@ async function getAvailableMusicFileName(targetDir, fileName) {
   throw error;
 }
 
-async function readMultipartForm(request, options = {}) {
+async function streamMultipartFiles(request, targetDir, options = {}) {
   const contentType = request.headers["content-type"] || "";
   const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
   if (!boundaryMatch) {
@@ -1739,45 +1781,165 @@ async function readMultipartForm(request, options = {}) {
     throw error;
   }
   const boundary = Buffer.from(`--${boundaryMatch[1] || boundaryMatch[2]}`);
-  const body = await readRawBody(request, options.maxBytes || 50 * 1024 * 1024);
-  const files = [];
-  const fields = {};
+  const boundaryMarker = Buffer.from(`\r\n--${boundaryMatch[1] || boundaryMatch[2]}`);
+  const uploads = [];
+  const tempPaths = [];
+  let buffer = Buffer.alloc(0);
+  let state = "boundary";
+  let current = null;
+  let totalBytes = 0;
 
-  let cursor = body.indexOf(boundary);
-  while (cursor !== -1) {
-    cursor += boundary.length;
-    if (body[cursor] === 45 && body[cursor + 1] === 45) break;
-    if (body[cursor] === 13 && body[cursor + 1] === 10) cursor += 2;
+  try {
+    for await (const chunk of request) {
+      totalBytes += chunk.length;
+      if (totalBytes > (options.maxBytes || 50 * 1024 * 1024)) {
+        const error = new Error("Request body is too large");
+        error.statusCode = 413;
+        throw error;
+      }
 
-    const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), cursor);
-    if (headerEnd === -1) break;
-    const headerText = body.subarray(cursor, headerEnd).toString("latin1");
-    const nextBoundary = body.indexOf(boundary, headerEnd + 4);
-    if (nextBoundary === -1) break;
+      buffer = Buffer.concat([buffer, chunk]);
+      while (true) {
+        if (state === "boundary") {
+          const boundaryIndex = buffer.indexOf(boundary);
+          if (boundaryIndex === -1) {
+            buffer = buffer.subarray(Math.max(0, buffer.length - boundary.length));
+            break;
+          }
+          buffer = buffer.subarray(boundaryIndex + boundary.length);
+          if (buffer.length < 2) break;
+          if (buffer[0] === 45 && buffer[1] === 45) {
+            state = "done";
+            break;
+          }
+          if (buffer[0] === 13 && buffer[1] === 10) {
+            buffer = buffer.subarray(2);
+            state = "headers";
+            continue;
+          }
+          break;
+        }
 
-    let content = body.subarray(headerEnd + 4, nextBoundary);
-    if (content.length >= 2 && content[content.length - 2] === 13 && content[content.length - 1] === 10) {
-      content = content.subarray(0, content.length - 2);
+        if (state === "headers") {
+          const headerEnd = buffer.indexOf(Buffer.from("\r\n\r\n"));
+          if (headerEnd === -1) break;
+          const headerText = buffer.subarray(0, headerEnd).toString("latin1");
+          buffer = buffer.subarray(headerEnd + 4);
+          current = await openMultipartUpload(targetDir, headerText);
+          if (current?.tempPath) tempPaths.push(current.tempPath);
+          state = "content";
+          continue;
+        }
+
+        if (state === "content") {
+          const boundaryIndex = buffer.indexOf(boundaryMarker);
+          if (boundaryIndex === -1) {
+            const safeLength = Math.max(0, buffer.length - boundaryMarker.length);
+            if (!safeLength) break;
+            await writeMultipartChunk(current, buffer.subarray(0, safeLength));
+            buffer = buffer.subarray(safeLength);
+            break;
+          }
+
+          await writeMultipartChunk(current, buffer.subarray(0, boundaryIndex));
+          await closeMultipartUpload(current, uploads);
+          current = null;
+          buffer = buffer.subarray(boundaryIndex + 2);
+          state = "boundary";
+          continue;
+        }
+
+        break;
+      }
     }
 
-    const disposition = headerText.match(/content-disposition:[^\r\n]+/i)?.[0] || "";
-    const dispositionParams = parseContentDispositionParams(disposition);
-    const name = dispositionParams.name || "";
-    const filename = dispositionParams["filename*"] || dispositionParams.filename || "";
-    if (filename) {
-      files.push({
-        fieldName: name,
-        fileName: decodeMultipartFileName(filename, Boolean(dispositionParams["filename*"])),
-        content,
-      });
-    } else if (name) {
-      fields[name] = content.toString("utf8");
+    if (state !== "done") {
+      const error = new Error("Incomplete multipart body");
+      error.statusCode = 400;
+      throw error;
     }
+    const files = uploads.filter((file) => file.fieldName === "files" || file.fieldName === "file");
+    if (!files.length) {
+      const error = new Error("Audio files are required");
+      error.statusCode = 400;
+      throw error;
+    }
+    return files;
+  } catch (error) {
+    if (current) await closeMultipartUpload(current, uploads).catch(() => {});
+    await Promise.all(tempPaths.map((filePath) => fs.promises.rm(filePath, { force: true }).catch(() => {})));
+    throw error;
+  }
+}
 
-    cursor = nextBoundary;
+async function openMultipartUpload(targetDir, headerText) {
+  const disposition = headerText.match(/content-disposition:[^\r\n]+/i)?.[0] || "";
+  const dispositionParams = parseContentDispositionParams(disposition);
+  const fieldName = dispositionParams.name || "";
+  const filename = dispositionParams["filename*"] || dispositionParams.filename || "";
+  if (fieldName !== "files" && fieldName !== "file") {
+    return { fieldName, fileName: "", bytes: 0, skipReason: "Unsupported field" };
+  }
+  if (!filename) return { fieldName, fileName: "", bytes: 0, skipReason: "Missing file name" };
+
+  const fileName = decodeMultipartFileName(filename, Boolean(dispositionParams["filename*"]));
+  const extension = path.extname(fileName).toLowerCase();
+  if (!isSupportedAudioExtension(extension)) {
+    return { fieldName, fileName, extension, bytes: 0, skipReason: "Unsupported audio type" };
   }
 
-  return { fields, files };
+  const tempPath = path.join(targetDir, `.upload-${crypto.randomUUID()}.tmp`);
+  return {
+    fieldName,
+    fileName,
+    extension,
+    tempPath,
+    handle: await fs.promises.open(tempPath, "wx"),
+    bytes: 0,
+  };
+}
+
+async function writeMultipartChunk(upload, chunk) {
+  if (!upload || upload.skipReason || !chunk.length) return;
+  await upload.handle.write(chunk);
+  upload.bytes += chunk.length;
+}
+
+async function closeMultipartUpload(upload, uploads) {
+  if (!upload) return;
+  if (upload.handle) {
+    await upload.handle.close();
+    delete upload.handle;
+  }
+  uploads.push(upload);
+}
+
+async function probeAudioFile(filePath) {
+  return new Promise((resolve) => {
+    const probe = spawn("ffprobe", [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "default=noprint_wrappers=1:nokey=1",
+      filePath,
+    ], { stdio: ["ignore", "pipe", "ignore"] });
+    let output = "";
+    const timer = setTimeout(() => probe.kill("SIGKILL"), 5000);
+    probe.stdout.on("data", (chunk) => {
+      output += chunk.toString("utf8");
+    });
+    probe.on("close", () => {
+      clearTimeout(timer);
+      const durationSeconds = Number.parseFloat(output);
+      resolve({
+        ok: Number.isFinite(durationSeconds) && durationSeconds > 0,
+        durationSeconds: Number.isFinite(durationSeconds) && durationSeconds > 0 ? durationSeconds : 0,
+      });
+    });
+    probe.on("error", () => {
+      clearTimeout(timer);
+      resolve({ ok: false, durationSeconds: 0 });
+    });
+  });
 }
 
 function parseContentDispositionParams(disposition) {
@@ -1809,21 +1971,6 @@ function decodeMultipartFileName(value, encoded) {
   } catch {
     return Buffer.from(String(value), "latin1").toString("utf8");
   }
-}
-
-async function readRawBody(request, maxBytes) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of request) {
-    size += chunk.length;
-    if (size > maxBytes) {
-      const error = new Error("Request body is too large");
-      error.statusCode = 413;
-      throw error;
-    }
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
 }
 
 async function findPlayableTrack(config, file) {
