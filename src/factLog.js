@@ -119,6 +119,19 @@ function getArchivedFactForSelection(log, voiceId, topicName, subtopicName, host
     .at(-1) || null;
 }
 
+function getAnyArchivedFactForSelection(log, voiceId, topicName, subtopicName, hostId = DEFAULT_HOST_ID) {
+  const normalizedHostId = normalizeHostId(hostId);
+  return normalizeFactLog(log).facts
+    .filter((fact) => (
+      fact.voiceId === voiceId
+      && fact.audioUrl
+      && fact.topic === topicName
+      && fact.subtopic === subtopicName
+      && normalizeHostId(fact.hostId) === normalizedHostId
+    ))
+    .at(-1) || null;
+}
+
 async function factAudioExists(config, fact) {
   const audioPath = resolveArchiveAudioPath(config, fact.audioUrl);
   if (!audioPath) return false;
@@ -204,6 +217,7 @@ function normalizePromptRevision(value) {
 module.exports = {
   addFactLogEntry,
   getArchivedFactForSelection,
+  getAnyArchivedFactForSelection,
   advanceCursor,
   getArchivedFacts,
   getRecentFacts,

@@ -3,36 +3,74 @@ const path = require("node:path");
 const { generateFact, generateFarewell, generateGreeting, generateListenerAnswer } = require("./deepseek");
 const { synthesize } = require("./elevenlabs");
 const { getActivePromptSet, readAdminConfig } = require("../adminStore");
-const { addFactLogEntry, advanceCursor, getArchivedFactForSelection, getRecentFacts, readAvailableFactLog } = require("../factLog");
+const {
+  addFactLogEntry,
+  advanceCursor,
+  getAnyArchivedFactForSelection,
+  getArchivedFactForSelection,
+  getRecentFacts,
+  readAvailableFactLog,
+} = require("../factLog");
 
 let factQueue = Promise.resolve();
+const STANDARD_VOICE_POOL_LIMIT = 6;
 
-async function createGreeting(config) {
+async function createGreeting(config, input = {}) {
   const admin = await readAdminConfig(config);
+  const promptSet = getActivePromptSet(admin);
+  const pool = await getReusableVoiceAssets(config, "greeting", promptSet, config.elevenlabs.voiceId);
+  if (!input.forceGenerate && pool.currentRevision.length >= STANDARD_VOICE_POOL_LIMIT) {
+    return toReusableVoicePayload(pickReusableVoiceAsset(pool.currentRevision), "greeting", "hello", "pool");
+  }
   const text = await generateGreeting(config.deepseek, admin).catch((error) => {
     console.warn(`DeepSeek greeting fallback: ${error.message}`);
     return "Добро пожаловать на AI Chill Radio. Проверяем голос диктора и запускаем локальный эфир.";
   });
 
-  return createArchivedVoice(config, {
+  const payload = await createArchivedVoice(config, {
     kind: "greeting",
     theme: "hello",
     text,
   });
+  if (!payload.audioUrl && pool.anyRevision.length) {
+    return toReusableVoicePayload(
+      pickReusableVoiceAsset(pool.currentRevision.length ? pool.currentRevision : pool.anyRevision),
+      "greeting",
+      "hello",
+      "fallback",
+      payload.audioError,
+    );
+  }
+  return payload;
 }
 
-async function createFarewell(config) {
+async function createFarewell(config, input = {}) {
   const admin = await readAdminConfig(config);
+  const promptSet = getActivePromptSet(admin);
+  const pool = await getReusableVoiceAssets(config, "farewell", promptSet, config.elevenlabs.voiceId);
+  if (!input.forceGenerate && pool.currentRevision.length >= STANDARD_VOICE_POOL_LIMIT) {
+    return toReusableVoicePayload(pickReusableVoiceAsset(pool.currentRevision), "farewell", "bye", "pool");
+  }
   const text = await generateFarewell(config.deepseek, admin).catch((error) => {
     console.warn(`DeepSeek farewell fallback: ${error.message}`);
     return "Спасибо, что были на волне AI Chill Radio. До встречи в следующем спокойном эфире.";
   });
 
-  return createArchivedVoice(config, {
+  const payload = await createArchivedVoice(config, {
     kind: "farewell",
     theme: "bye",
     text,
   });
+  if (!payload.audioUrl && pool.anyRevision.length) {
+    return toReusableVoicePayload(
+      pickReusableVoiceAsset(pool.currentRevision.length ? pool.currentRevision : pool.anyRevision),
+      "farewell",
+      "bye",
+      "fallback",
+      payload.audioError,
+    );
+  }
+  return payload;
 }
 
 async function createFact(config, input = {}) {
@@ -95,6 +133,36 @@ async function createFactUnlocked(config, input = {}) {
     subtopicIndex: selection.subtopicIndex,
     text,
   });
+  if (!payload.audioUrl) {
+    const fallback = getAnyArchivedFactForSelection(
+      log,
+      config.elevenlabs.voiceId,
+      topicName,
+      subtopicName,
+      promptSet.hostId,
+    );
+    if (fallback) {
+      return {
+        text: fallback.text,
+        audioUrl: fallback.audioUrl,
+        archived: true,
+        archivePath: fallback.archivePath,
+        theme: fallback.topic,
+        topic: fallback.topic,
+        topicIndex: selection.topicIndex,
+        subtopic: fallback.subtopic,
+        subtopicIndex: selection.subtopicIndex,
+        kind: "facts",
+        voiceId: fallback.voiceId,
+        promptRevision: fallback.promptRevision,
+        hostId: fallback.hostId,
+        hostName: fallback.hostName,
+        audioError: payload.audioError,
+        source: "archive-fallback",
+      };
+    }
+    return { ...payload, source: "generation-failed" };
+  }
   await addFactLogEntry(config, payload);
   return { ...payload, source: "generated" };
 }
@@ -185,6 +253,77 @@ function getArchivePaths(config, item) {
     dir,
     relativeDir,
     publicUrlPrefix: `/archive/${relativeDir}`,
+  };
+}
+
+async function getReusableVoiceAssets(config, kind, promptSet, voiceId) {
+  const assets = [];
+  const kindDir = path.join(config.archiveDir, sanitizeSlug(kind));
+  for (const metaPath of await walkMetaFiles(kindDir)) {
+    try {
+      const payload = JSON.parse(await fs.promises.readFile(metaPath, "utf8"));
+      if (
+        payload.kind !== kind
+        || payload.voiceId !== voiceId
+        || payload.hostId !== promptSet.hostId
+        || !payload.audioUrl
+      ) continue;
+      const audioPath = resolveArchiveAudioPath(config, payload.audioUrl);
+      const stats = audioPath ? await fs.promises.stat(audioPath).catch(() => null) : null;
+      if (!stats?.isFile()) continue;
+      assets.push(payload);
+    } catch {}
+  }
+
+  return {
+    anyRevision: assets,
+    currentRevision: assets.filter((asset) => Number(asset.promptRevision || 0) === Number(promptSet.revision || 0)),
+  };
+}
+
+async function walkMetaFiles(rootDir) {
+  let entries = [];
+  try {
+    entries = await fs.promises.readdir(rootDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files = [];
+  for (const entry of entries) {
+    const filePath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) files.push(...await walkMetaFiles(filePath));
+    if (entry.isFile() && entry.name.endsWith("-meta.json")) files.push(filePath);
+  }
+  return files;
+}
+
+function resolveArchiveAudioPath(config, audioUrl) {
+  let relativePath = String(audioUrl || "");
+  if (!relativePath.startsWith("/archive/")) return null;
+  try {
+    relativePath = decodeURIComponent(relativePath.slice("/archive/".length));
+  } catch {
+    return null;
+  }
+  const archiveDir = path.resolve(config.archiveDir);
+  const audioPath = path.resolve(archiveDir, relativePath);
+  return audioPath.startsWith(`${archiveDir}${path.sep}`) ? audioPath : null;
+}
+
+function pickReusableVoiceAsset(items) {
+  return items[Math.floor(Math.random() * items.length)];
+}
+
+function toReusableVoicePayload(asset, kind, theme, source, audioError = null) {
+  return {
+    ...asset,
+    kind,
+    theme,
+    topic: theme,
+    archived: true,
+    source,
+    audioError,
   };
 }
 

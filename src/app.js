@@ -665,6 +665,7 @@ async function runPaymentFlowSelfTest(config) {
 function createTopicCycleController(config, broadcast) {
   let timer = null;
   let running = false;
+  let pendingRun = null;
   let state = {
     active: false,
     mode: "all-loop",
@@ -712,6 +713,7 @@ function createTopicCycleController(config, broadcast) {
 
   async function start(input = {}) {
     clearTimer();
+    pendingRun = null;
     const admin = await readAdminConfig(config);
     const mode = normalizeTopicCycleMode(input.mode);
     const requestedTopicId = normalizeTopicId(input.topicId);
@@ -772,6 +774,7 @@ function createTopicCycleController(config, broadcast) {
 
   async function stop() {
     clearTimer();
+    pendingRun = null;
     state = {
       ...state,
       active: false,
@@ -791,6 +794,7 @@ function createTopicCycleController(config, broadcast) {
   async function pauseForBroadcastStop() {
     if (!state.active) return getStatus();
     clearTimer();
+    pendingRun = null;
     state = {
       ...state,
       active: false,
@@ -809,6 +813,7 @@ function createTopicCycleController(config, broadcast) {
 
   async function resumeAfterBroadcastRestore() {
     if (state.active || state.completionReason !== "broadcast_stop") return getStatus();
+    pendingRun = null;
     state = {
       ...state,
       active: true,
@@ -870,54 +875,95 @@ function createTopicCycleController(config, broadcast) {
         });
         return;
       }
-      const selection = selectTopicCycleItem(admin);
-      if (!selection) {
-        throw new Error("No topic cycle selection is available");
+      const attemptLimit = getTopicCycleAttemptLimit(admin);
+      let queuedPayload = null;
+      let queuedSelection = null;
+      let lastAttemptError = null;
+
+      for (let attempt = 0; attempt < attemptLimit; attempt += 1) {
+        const selection = selectTopicCycleItem(admin);
+        if (!selection) break;
+        const nextCursor = getAdvancedTopicCycleCursor(admin, selection);
+        try {
+          const payload = await withTimeout(createFact(config, {
+            topic: selection.topic.name,
+            subtopic: selection.subtopic,
+          }), 180_000, "Topic cycle generation timed out");
+          const title = payload.subtopic ? `${payload.topic}: ${payload.subtopic}` : "Тема эфира";
+          const topicCycleRun = {
+            id: `topic-cycle:${Date.now()}:${Math.random().toString(16).slice(2)}`,
+            selection,
+            nextCursor,
+            payload,
+          };
+          const result = await enqueueGeneratedVoice(config, broadcast, {
+            ...payload,
+            title,
+            source: "topic-cycle",
+          }, payload, {
+            onEnd: () => completeQueuedTopicCycleRun(topicCycleRun),
+            onError: (error) => handleQueuedTopicCycleRunError(topicCycleRun, error),
+          });
+
+          if (result.statusCode >= 400) {
+            state = { ...state, ...nextCursor };
+            lastAttemptError = result.body.error || "Topic cycle audio was not queued";
+            await writeSystemLog(config, "topic_cycle_fact_skipped", {
+              topic: selection.topic.name,
+              subtopic: selection.subtopic,
+              reason: lastAttemptError,
+              nextCursor,
+            });
+            if (isSelectedTopicLastSelection(admin, selection)) break;
+            continue;
+          }
+
+          pendingRun = topicCycleRun;
+          queuedPayload = payload;
+          queuedSelection = selection;
+          break;
+        } catch (error) {
+          state = { ...state, ...nextCursor };
+          lastAttemptError = error.message;
+          await writeSystemLog(config, "topic_cycle_fact_skipped", {
+            topic: selection.topic.name,
+            subtopic: selection.subtopic,
+            reason: error.message,
+            nextCursor,
+          });
+          if (isSelectedTopicLastSelection(admin, selection)) break;
+        }
       }
-      const payload = await withTimeout(createFact(config, {
-        topic: selection.topic.name,
-        subtopic: selection.subtopic,
-      }), 180_000, "Topic cycle generation timed out");
-      const title = payload.subtopic ? `${payload.topic}: ${payload.subtopic}` : "Тема эфира";
-      const result = await enqueueGeneratedVoice(config, broadcast, {
-        ...payload,
-        title,
-        source: "topic-cycle",
-      }, payload);
-      if (result.statusCode >= 400) {
-        throw new Error(result.body.error || "Topic cycle audio was not queued");
+
+      if (!queuedPayload || !queuedSelection) {
+        if (state.mode === "selected-once") {
+          state = {
+            ...state,
+            active: false,
+            nextRunAt: null,
+            stoppedAt: new Date().toISOString(),
+            completionReason: "selected_topic_exhausted",
+            lastError: lastAttemptError ? { at: new Date().toISOString(), message: lastAttemptError } : null,
+          };
+          await writeSystemLog(config, "topic_cycle_completed", {
+            mode: state.mode,
+            selectedTopicId: state.selectedTopicId,
+            selectedTopicName: state.selectedTopicName,
+            order: state.order,
+            reason: state.completionReason,
+            runCount: state.runCount,
+          });
+          return;
+        }
+        throw new Error(lastAttemptError || "No playable topic cycle audio is available");
       }
-      state = {
-        ...state,
-        ...getAdvancedTopicCycleCursor(admin, selection),
-        lastRun: {
-          at: new Date().toISOString(),
-          topic: payload.topic,
-          subtopic: payload.subtopic,
-          queued: true,
-        },
-        lastError: null,
-        runCount: Number(state.runCount || 0) + 1,
-      };
-      await writeSystemLog(config, "topic_cycle_fact_queued", state.lastRun);
-      if (await shouldStopTopicCycleAfterRun(payload)) {
-        state = {
-          ...state,
-          active: false,
-          nextRunAt: null,
-          stoppedAt: new Date().toISOString(),
-          completionReason: "selected_topic_completed",
-        };
-        await writeSystemLog(config, "topic_cycle_completed", {
-          mode: state.mode,
-          selectedTopicId: state.selectedTopicId,
-          selectedTopicName: state.selectedTopicName,
-          order: state.order,
-          lastTopic: payload.topic,
-          lastSubtopic: payload.subtopic,
-          runCount: state.runCount,
-        });
-      }
+
+      await writeSystemLog(config, "topic_cycle_fact_queued", {
+        at: new Date().toISOString(),
+        topic: queuedPayload.topic,
+        subtopic: queuedPayload.subtopic,
+        queued: true,
+      });
       await emitFactState(config);
       await emitAdmin(config, "archive", { changed: true });
     } catch (error) {
@@ -933,7 +979,100 @@ function createTopicCycleController(config, broadcast) {
       running = false;
       await saveState();
       await emitAdmin(config, "topic-cycle", getStatus());
-      if (state.active) scheduleNext();
+      if (state.active && !pendingRun) scheduleNext();
+    }
+  }
+
+  async function completeQueuedTopicCycleRun(run) {
+    if (pendingRun !== run) return;
+    pendingRun = null;
+    const admin = await readAdminConfig(config);
+    state = {
+      ...state,
+      ...run.nextCursor,
+      lastRun: {
+        at: new Date().toISOString(),
+        topic: run.payload.topic,
+        subtopic: run.payload.subtopic,
+        queued: true,
+        played: true,
+      },
+      lastError: null,
+      runCount: Number(state.runCount || 0) + 1,
+    };
+    await writeSystemLog(config, "topic_cycle_fact_played", state.lastRun);
+    if (isSelectedTopicLastSelection(admin, run.selection)) {
+      state = {
+        ...state,
+        active: false,
+        nextRunAt: null,
+        stoppedAt: new Date().toISOString(),
+        completionReason: "selected_topic_completed",
+      };
+      await writeSystemLog(config, "topic_cycle_completed", {
+        mode: state.mode,
+        selectedTopicId: state.selectedTopicId,
+        selectedTopicName: state.selectedTopicName,
+        order: state.order,
+        lastTopic: run.payload.topic,
+        lastSubtopic: run.payload.subtopic,
+        runCount: state.runCount,
+      });
+    }
+    await saveState();
+    await emitAdmin(config, "topic-cycle", getStatus());
+    if (state.active) scheduleNext();
+  }
+
+  async function handleQueuedTopicCycleRunError(run, error) {
+    if (pendingRun !== run) return;
+    pendingRun = null;
+    clearTimer();
+    const admin = await readAdminConfig(config);
+    const message = error?.message || "Topic cycle voice playback failed";
+    state = {
+      ...state,
+      ...run.nextCursor,
+      lastError: {
+        at: new Date().toISOString(),
+        message,
+      },
+    };
+    await writeSystemLog(config, "topic_cycle_fact_skipped", {
+      topic: run.selection.topic.name,
+      subtopic: run.selection.subtopic,
+      reason: message,
+      stage: "playback",
+      nextCursor: {
+        cursorTopicIndex: state.cursorTopicIndex,
+        cursorSubtopicIndex: state.cursorSubtopicIndex,
+      },
+    });
+    if (state.mode === "selected-once" && isSelectedTopicLastSelection(admin, run.selection)) {
+      state = {
+        ...state,
+        active: false,
+        nextRunAt: null,
+        stoppedAt: new Date().toISOString(),
+        completionReason: "selected_topic_exhausted",
+      };
+      await writeSystemLog(config, "topic_cycle_completed", {
+        mode: state.mode,
+        selectedTopicId: state.selectedTopicId,
+        selectedTopicName: state.selectedTopicName,
+        order: state.order,
+        reason: state.completionReason,
+        runCount: state.runCount,
+      });
+    }
+    await saveState();
+    await emitAdmin(config, "topic-cycle", getStatus());
+    if (state.active) {
+      queueMicrotask(() => {
+        runOnce().catch((runError) => {
+          console.error(`Topic cycle retry failed: ${runError.message}`);
+        });
+      });
     }
   }
 
@@ -1010,13 +1149,20 @@ function createTopicCycleController(config, broadcast) {
     }
   }
 
-  async function shouldStopTopicCycleAfterRun(payload) {
+  function isSelectedTopicLastSelection(admin, selection) {
     if (state.mode !== "selected-once") return false;
-    const admin = await readAdminConfig(config);
     const topic = findSelectedTopic(admin);
     if (!topic) return true;
-    if (payload.topic !== topic.name) return true;
-    return Number(payload.subtopicIndex) >= topic.subtopics.length - 1;
+    if (selection.topic.name !== topic.name) return true;
+    return Number(selection.subtopicIndex) >= topic.subtopics.length - 1;
+  }
+
+  function getTopicCycleAttemptLimit(admin) {
+    const topics = Array.isArray(admin.topics) ? admin.topics : [];
+    if (state.mode === "selected-once") {
+      return Math.max(1, findSelectedTopic(admin)?.subtopics?.length || 1);
+    }
+    return Math.max(1, topics.reduce((total, topic) => total + (topic.subtopics?.length || 0), 0));
   }
 
   function findSelectedTopic(admin) {
@@ -1116,7 +1262,7 @@ async function sendGeneratedVoice(response, config, broadcast, event, payload) {
   await sendJson(response, result.statusCode, result.body);
 }
 
-async function enqueueGeneratedVoice(config, broadcast, event, payload) {
+async function enqueueGeneratedVoice(config, broadcast, event, payload, options = {}) {
   if (!payload.audioUrl) {
     const error = payload.audioError || "Voice audio was not created";
     await writeSystemLog(config, "voice_generation_failed", {
@@ -1128,7 +1274,7 @@ async function enqueueGeneratedVoice(config, broadcast, event, payload) {
     return { statusCode: 502, body: { ...payload, queued: false, error } };
   }
 
-  const queued = broadcast.enqueueVoice(event);
+  const queued = broadcast.enqueueVoice(event, options);
   if (!queued) {
     const error = "Generated audio could not be resolved for broadcast";
     await writeSystemLog(config, "voice_enqueue_failed", {
