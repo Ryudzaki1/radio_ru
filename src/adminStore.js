@@ -6,6 +6,7 @@ const DEFAULT_HOST_ID = "sweetiefox";
 const promptKinds = ["greeting", "fact", "listener", "farewell"];
 
 const defaultPromptConfig = {
+  revision: 0,
   common: "Общие правила для всех ведущих AI Chill Radio. Пиши только готовый текст для озвучки, без markdown, списков, кавычек, эмодзи и технических комментариев. Все числа, годы, проценты, единицы измерения и сокращения произноси словами: не 30-40 секунд, а от тридцати до сорока секунд; не 3D, а три-дэ; не AI, а эй-ай, если это должно звучать именно так. Для естественной речи используй короткие фразы, живую пунктуацию и редкие паузы ElevenLabs в формате <break time=\"0.35s\" /> или <break time=\"0.55s\" />; не ставь паузы подряд и не делай их длиннее одной секунды. Для русского текста не используй SSML phoneme: он не подходит для нашей русской озвучки. Если слово может быть прочитано неверно, переформулируй его или поставь явное ударение в слове. Интонация должна быть спокойной, уверенной, теплой и радиоформатной: не лекция, не реклама и не сухая энциклопедия.",
   activeHostId: DEFAULT_HOST_ID,
   hosts: {
@@ -255,6 +256,7 @@ function normalizePromptConfig(value = {}) {
   const requestedHostId = normalizeHostId(input.activeHostId) || DEFAULT_HOST_ID;
   const activeHostId = hosts[requestedHostId] ? requestedHostId : DEFAULT_HOST_ID;
   return {
+    revision: Math.max(0, Math.floor(Number(input.revision) || 0)),
     common: normalizePrompt(input.common, defaultPromptConfig.common),
     activeHostId,
     hosts,
@@ -266,6 +268,7 @@ function getActivePromptSet(admin = {}) {
   const hostId = prompts.activeHostId;
   const host = prompts.hosts[hostId] || prompts.hosts[DEFAULT_HOST_ID];
   return {
+    revision: prompts.revision,
     common: prompts.common,
     hostId,
     hostName: host.name || hostId,

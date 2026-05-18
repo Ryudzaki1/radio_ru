@@ -6,7 +6,8 @@ async function generateGreeting(config, admin) {
     return "Добро пожаловать на AI Chill Radio. Сегодня ловим мягкий вайб, странные факты и музыку без лишней суеты.";
   }
 
-  return chat(config, {
+  const promptSet = getActivePromptSet(admin);
+  const text = await chat(config, {
     temperature: 0.95,
     maxTokens: 130,
     maxChars: 900,
@@ -14,6 +15,7 @@ async function generateGreeting(config, admin) {
     user: buildPrompt(admin, "greeting", `Название станции: ${admin.stationName}. Сделай новую версию, не повторяй прошлые формулировки.`),
     fallback: "Добро пожаловать на AI Chill Radio. Сегодня ловим мягкий вайб, странные факты и музыку без лишней суеты.",
   });
+  return limitByPromptSentenceCount(text, promptSet.greeting || promptSet.fact);
 }
 
 async function generateFarewell(config, admin) {
@@ -21,7 +23,8 @@ async function generateFarewell(config, admin) {
     return "Спасибо, что были на волне AI Chill Radio. Уходите мягко, возвращайтесь с улыбкой.";
   }
 
-  return chat(config, {
+  const promptSet = getActivePromptSet(admin);
+  const text = await chat(config, {
     temperature: 0.95,
     maxTokens: 120,
     maxChars: 900,
@@ -29,6 +32,7 @@ async function generateFarewell(config, admin) {
     user: buildPrompt(admin, "farewell", `Название станции: ${admin.stationName}. Сделай новую версию, не повторяй прошлые формулировки.`),
     fallback: "Спасибо, что были на волне AI Chill Radio. Уходите мягко, возвращайтесь с улыбкой.",
   });
+  return limitByPromptSentenceCount(text, promptSet.farewell || promptSet.fact);
 }
 
 async function generateFact(config, topic, subtopic, admin, recentFacts = [], context = {}) {
@@ -43,7 +47,8 @@ async function generateFact(config, topic, subtopic, admin, recentFacts = [], co
     ? "\nЭто первая подтема нового тематического часа. Первой фразой естественно объяви переход к теме, без шаблона и без слова «рубрика»."
     : "\nПервой фразой естественно напомни главную тему и назови текущую подтему, но меняй формулировку и не используй один и тот же шаблон.";
 
-  return chat(config, {
+  const promptSet = getActivePromptSet(admin);
+  const text = await chat(config, {
     temperature: 0.92,
     maxTokens: 1200,
     maxChars: 5200,
@@ -51,6 +56,7 @@ async function generateFact(config, topic, subtopic, admin, recentFacts = [], co
     user: buildPrompt(admin, "fact", `Главная тема: ${topic}.\nПодтема: ${subtopic}.\nЭто обязательная подтема выпуска, не уходи в соседние подтемы.${topicIntro}${avoid}\nВыдай только готовый текст диктора для эфира.`),
     fallback: `Факт на тему ${topic}, ${subtopic}: иногда самые спокойные наблюдения оказываются самыми запоминающимися.`,
   });
+  return limitByPromptSentenceCount(text, promptSet.fact);
 }
 
 async function generateListenerAnswer(config, userName, question, admin) {
@@ -64,7 +70,7 @@ async function generateListenerAnswer(config, userName, question, admin) {
     temperature: 0.9,
     maxTokens: 1200,
     maxChars: 7000,
-    system: "Ты диктор AI Chill Radio, женская спокойная подача Sweetie Fox. Главная инструкция по стилю, длине и структуре находится в промпте администратора. Если промпт администратора задает количество предложений, строго соблюдай его. Не добавляй другую длину от себя. Без markdown, списков, кавычек и эмодзи.",
+    system: `Ты диктор AI Chill Radio. Главная инструкция по стилю, длине, структуре и подаче находится в промпте администратора для ведущего ${promptSet.hostName}. Если промпт администратора задает количество предложений, строго соблюдай его. Не добавляй другую длину от себя. Без markdown, списков, кавычек и эмодзи.`,
     user: buildPrompt(admin, "listener", `Контекст эфира:\nСлушатель: ${userName}.\nВопрос слушателя: ${question}.\n\nСформируй ответ для живого эфира. Начни с обращения: ${userName} прислал такой вопрос. Затем коротко озвучь вопрос и ответь по сути. Если в промпте администратора разрешены паузы, используй <break time=0.35s /> или <break time=0.55s /> только там, где это естественно. Не превышай длину, указанную в промпте администратора.`),
     fallback: `${userName} прислал вопрос: ${question}. <break time=0.45s /> Интересный повод притормозить и посмотреть на тему внимательнее.`,
   });

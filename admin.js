@@ -128,13 +128,13 @@ initSyncedSliders();
 initAdminActionLogging();
 activeHostSelect?.addEventListener("change", () => {
   if (!currentConfig?.prompts) return;
-  currentConfig.prompts.activeHostId = getActiveHostId();
+  switchActiveHost(activeHostSelect.value);
   renderConfig(currentConfig);
 });
 voiceHostSelect?.addEventListener("change", () => {
   if (!currentConfig?.prompts) return;
-  currentConfig.prompts.activeHostId = voiceHostSelect.value;
-  if (activeHostSelect) activeHostSelect.value = voiceHostSelect.value;
+  switchActiveHost(voiceHostSelect.value);
+  renderConfig(currentConfig);
 });
 topicNameInput?.addEventListener("input", () => {
   if (!currentConfig?.topics[selectedTopicIndex]) return;
@@ -399,6 +399,27 @@ function getActiveHost(config = currentConfig) {
 
 function getActiveHostId() {
   return currentConfig?.prompts?.activeHostId || activeHostSelect?.value || "sweetiefox";
+}
+
+function switchActiveHost(nextHostId) {
+  persistVisiblePromptFields();
+  currentConfig.prompts.activeHostId = nextHostId;
+  if (activeHostSelect) activeHostSelect.value = nextHostId;
+  if (voiceHostSelect) voiceHostSelect.value = nextHostId;
+}
+
+function persistVisiblePromptFields() {
+  if (!currentConfig?.prompts?.hosts) return;
+  const hostId = currentConfig.prompts.activeHostId;
+  if (!hostId || !currentConfig.prompts.hosts[hostId]) return;
+  currentConfig.prompts.hosts[hostId] = {
+    ...currentConfig.prompts.hosts[hostId],
+    name: hostNameInput.value,
+    greeting: greetingPrompt.value,
+    fact: factPrompt.value,
+    listener: listenerPrompt.value,
+    farewell: farewellPrompt.value,
+  };
 }
 
 function renderTopicDetail() {
@@ -715,7 +736,7 @@ function getVoiceMusicSnapshot() {
 }
 
 async function refreshPrompts() {
-  const confirmed = window.confirm("Обновить промпты ведущего и общий промпт? Сохраненные mp3 останутся в архиве. Новые правила применятся к следующим генерациям, а уже сохраненные подтемы будут воспроизводиться из архива, пока ты их не удалишь.");
+  const confirmed = window.confirm("Обновить промпты ведущего и общий промпт? Сохраненные mp3 останутся в архиве, но после обновления старые записи тем больше не будут считаться актуальными для новой ревизии промптов и при следующем запуске будут сгенерированы заново.");
   if (!confirmed) return;
 
   refreshPromptsButton.disabled = true;
@@ -733,7 +754,7 @@ async function refreshPrompts() {
     currentConfig = payload.admin;
     renderConfig(currentConfig);
     await Promise.all([refreshFactLog(), refreshArchive()]);
-    setStatus("Промпты обновлены. Архив и отметки сохраненных mp3 не удалены.");
+    setStatus("Промпты обновлены. Архив не удален, но для новой ревизии тем будут использоваться только новые mp3.");
   } catch (error) {
     setStatus(`Не удалось обновить промпты: ${error.message}`);
   } finally {
@@ -1377,12 +1398,19 @@ function getVoicedSets() {
   const topics = new Set();
   const activeHostId = getActiveHostId();
   const activeVoiceId = factLog.activeVoiceId || null;
+  const activePromptRevision = currentConfig?.prompts?.revision ?? 0;
   for (const fact of factLog.facts || []) {
     const factHostId = fact.hostId || "sweetiefox";
     if (factHostId !== activeHostId) continue;
     if (fact.topic) topics.add(fact.topic);
     if (fact.topic && fact.subtopic) subtopics.add(getPairKey(fact.topic, fact.subtopic));
-    if (fact.topic && fact.subtopic && fact.audioUrl && fact.voiceId === activeVoiceId) {
+    if (
+      fact.topic
+      && fact.subtopic
+      && fact.audioUrl
+      && fact.voiceId === activeVoiceId
+      && Number(fact.promptRevision || 0) === activePromptRevision
+    ) {
       savedSubtopics.add(getPairKey(fact.topic, fact.subtopic));
     }
   }

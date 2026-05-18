@@ -54,6 +54,7 @@ async function addFactLogEntry(config, entry) {
     audioUrl: entry.audioUrl,
     archivePath: entry.archivePath,
     voiceId: entry.voiceId,
+    promptRevision: normalizePromptRevision(entry.promptRevision),
     hostId: normalizeHostId(entry.hostId),
     hostName: entry.hostName ? String(entry.hostName) : null,
   });
@@ -101,17 +102,19 @@ function getRecentFacts(log, topicName, subtopicName, limit = 8) {
     .reverse();
 }
 
-function getArchivedFacts(log, voiceId, hostId = DEFAULT_HOST_ID) {
+function getArchivedFacts(log, voiceId, hostId = DEFAULT_HOST_ID, promptRevision = 0) {
   const normalizedHostId = normalizeHostId(hostId);
+  const normalizedPromptRevision = normalizePromptRevision(promptRevision);
   return normalizeFactLog(log).facts.filter((fact) => (
     fact.voiceId === voiceId
     && fact.audioUrl
     && normalizeHostId(fact.hostId) === normalizedHostId
+    && normalizePromptRevision(fact.promptRevision) === normalizedPromptRevision
   ));
 }
 
-function getArchivedFactForSelection(log, voiceId, topicName, subtopicName, hostId = DEFAULT_HOST_ID) {
-  return getArchivedFacts(log, voiceId, hostId)
+function getArchivedFactForSelection(log, voiceId, topicName, subtopicName, hostId = DEFAULT_HOST_ID, promptRevision = 0) {
+  return getArchivedFacts(log, voiceId, hostId, promptRevision)
     .filter((fact) => fact.topic === topicName && fact.subtopic === subtopicName)
     .at(-1) || null;
 }
@@ -170,6 +173,7 @@ function normalizeFactLog(payload = {}) {
         audioUrl: fact.audioUrl ? String(fact.audioUrl) : null,
         archivePath: fact.archivePath ? String(fact.archivePath) : null,
         voiceId: fact.voiceId ? String(fact.voiceId) : null,
+        promptRevision: normalizePromptRevision(fact.promptRevision),
         hostId: normalizeHostId(fact.hostId),
         hostName: fact.hostName ? String(fact.hostName) : null,
       }))
@@ -191,6 +195,10 @@ function normalizeCursor(cursor = {}) {
     topicIndex: Math.max(0, Math.floor(Number(cursor.topicIndex) || 0)),
     subtopicIndex: Math.max(0, Math.floor(Number(cursor.subtopicIndex) || 0)),
   };
+}
+
+function normalizePromptRevision(value) {
+  return Math.max(0, Math.floor(Number(value) || 0));
 }
 
 module.exports = {

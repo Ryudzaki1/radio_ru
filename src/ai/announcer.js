@@ -52,7 +52,14 @@ async function createFactUnlocked(config, input = {}) {
   const topicName = selection.topic.name;
   const subtopicName = selection.subtopic;
 
-  const archived = getArchivedFactForSelection(log, config.elevenlabs.voiceId, topicName, subtopicName, promptSet.hostId);
+  const archived = getArchivedFactForSelection(
+    log,
+    config.elevenlabs.voiceId,
+    topicName,
+    subtopicName,
+    promptSet.hostId,
+    promptSet.revision,
+  );
   if (archived && !input.forceGenerate) {
     return {
       text: archived.text,
@@ -81,6 +88,7 @@ async function createFactUnlocked(config, input = {}) {
     kind: "facts",
     hostId: promptSet.hostId,
     hostName: promptSet.hostName,
+    promptRevision: promptSet.revision,
     topic: topicName,
     topicIndex: selection.topicIndex,
     subtopic: subtopicName,
@@ -142,6 +150,7 @@ async function createArchivedVoice(config, item) {
     userName: item.userName,
     question: item.question,
     voiceId: config.elevenlabs.voiceId,
+    promptRevision: item.promptRevision ?? promptSet.revision,
     hostId: item.hostId || promptSet.hostId,
     hostName: item.hostName || promptSet.hostName,
     audioError,

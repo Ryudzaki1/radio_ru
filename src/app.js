@@ -397,10 +397,18 @@ function createServer(config) {
 
       if (request.method === "POST" && url.pathname === "/api/admin/prompts/refresh") {
         const body = await readJson(request);
-        const admin = await writeAdminConfig(config, body);
+        const currentAdmin = await readAdminConfig(config);
+        const admin = await writeAdminConfig(config, {
+          ...body,
+          prompts: {
+            ...(body.prompts || {}),
+            revision: Math.max(0, Math.floor(Number(currentAdmin.prompts?.revision) || 0)) + 1,
+          },
+        });
         await writeSystemLog(config, "admin_prompts_refreshed", {
           stationName: admin.stationName,
           activeHostId: admin.prompts?.activeHostId || null,
+          promptRevision: admin.prompts?.revision ?? null,
           hostCount: admin.prompts?.hosts ? Object.keys(admin.prompts.hosts).length : 0,
         });
         await emitAdmin(config, "config", admin);
