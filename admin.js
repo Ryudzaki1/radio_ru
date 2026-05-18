@@ -311,7 +311,7 @@ function renderConfig(config) {
   topicCycleMaxInput.value = config.topicCycle?.maxIntervalMinutes ?? 6;
   setTopicCycleOrder(config.topicCycle?.order || "topic-first");
   setSyncedSliderValue("musicLevel", config.audioMix?.musicLevel ?? 0.72);
-  setSyncedSliderValue("voiceLevel", config.audioMix?.voiceLevel ?? 1);
+  setSyncedSliderValue("voiceLevel", config.audioMix?.voiceLevel ?? 2.4);
   setSyncedSliderValue("duckingRatio", config.audioMix?.duckingRatio ?? 0.18);
   audioMixInputs.preludeSeconds.value = config.audioMix?.preludeSeconds ?? 0;
   audioMixInputs.duckFadeSeconds.value = config.audioMix?.duckFadeSeconds ?? 1.6;
@@ -403,7 +403,9 @@ function getActiveHostId() {
 
 function switchActiveHost(nextHostId) {
   persistVisiblePromptFields();
+  persistVisibleVoiceFields();
   currentConfig.prompts.activeHostId = nextHostId;
+  currentConfig.voice = getVoiceProfile(currentConfig, nextHostId);
   if (activeHostSelect) activeHostSelect.value = nextHostId;
   if (voiceHostSelect) voiceHostSelect.value = nextHostId;
 }
@@ -420,6 +422,29 @@ function persistVisiblePromptFields() {
     listener: listenerPrompt.value,
     farewell: farewellPrompt.value,
   };
+}
+
+function persistVisibleVoiceFields() {
+  if (!currentConfig) return;
+  const hostId = getActiveHostId();
+  currentConfig.voiceProfiles ||= {};
+  currentConfig.voiceProfiles[hostId] = collectVisibleVoiceFields();
+  currentConfig.voice = currentConfig.voiceProfiles[hostId];
+}
+
+function collectVisibleVoiceFields() {
+  return {
+    model: voiceInputs.model?.value || "eleven_multilingual_v2",
+    stability: getSyncedSliderNumber("stability"),
+    similarityBoost: getSyncedSliderNumber("similarityBoost"),
+    style: getSyncedSliderNumber("style"),
+    speed: getSyncedSliderNumber("speed"),
+    speakerBoost: voiceInputs.speakerBoost.checked,
+  };
+}
+
+function getVoiceProfile(config = currentConfig, hostId = getActiveHostId()) {
+  return config?.voiceProfiles?.[hostId] || config?.voice || {};
 }
 
 function renderTopicDetail() {
@@ -634,7 +659,7 @@ async function saveVoiceMusicSettings() {
 
   const nextSnapshot = getVoiceMusicSnapshot();
   if (nextSnapshot !== voiceMusicSnapshot) {
-    const confirmed = window.confirm("Применить изменения параметров голоса и музыки? Они сразу попадут в серверный конфиг и будут использованы для следующих выходов ведущего в эфир.");
+    const confirmed = window.confirm("Применить изменения параметров голоса и музыки? Музыкальный микс изменится для следующих сегментов эфира, а параметры голоса — для следующих новых генераций mp3. Уже созданные mp3 не пересинтезируются.");
     if (!confirmed) {
       restoreVoiceMusicFieldsFromSnapshot();
       setVoiceMusicLock(true);
@@ -646,7 +671,7 @@ async function saveVoiceMusicSettings() {
   await saveConfig();
   voiceMusicSnapshot = getVoiceMusicSnapshot();
   setVoiceMusicLock(true);
-  setStatus("Параметры применены. Следующая речь ведущего возьмет новый голос и микс.");
+  setStatus("Параметры применены. Следующие сегменты эфира возьмут новый микс, а новые mp3 ведущего — новые голосовые параметры.");
 }
 
 function toggleVoiceMusicLock() {
@@ -694,6 +719,11 @@ function restoreVoiceMusicFieldsFromSnapshot() {
   }
 
   if (currentConfig?.prompts) currentConfig.prompts.activeHostId = snapshot.activeHostId;
+  if (currentConfig) {
+    currentConfig.voiceProfiles = snapshot.voiceProfiles || {};
+    currentConfig.voiceProfiles[snapshot.activeHostId] = snapshot.voice;
+    currentConfig.voice = snapshot.voice;
+  }
   if (voiceHostSelect) voiceHostSelect.value = snapshot.activeHostId;
   if (activeHostSelect) activeHostSelect.value = snapshot.activeHostId;
   if (voiceInputs.model) voiceInputs.model.value = snapshot.voice.model;
@@ -713,17 +743,13 @@ function restoreVoiceMusicFieldsFromSnapshot() {
 
 function getVoiceMusicSnapshot() {
   if (!currentConfig) return "";
+  persistVisibleVoiceFields();
   return JSON.stringify({
     activeHostId: getActiveHostId(),
-    voice: {
-      model: voiceInputs.model?.value || "eleven_multilingual_v2",
-      stability: getSyncedSliderNumber("stability"),
-      similarityBoost: getSyncedSliderNumber("similarityBoost"),
-      style: getSyncedSliderNumber("style"),
-      speed: getSyncedSliderNumber("speed"),
-      speakerBoost: voiceInputs.speakerBoost.checked,
-    },
+    voice: collectVisibleVoiceFields(),
+    voiceProfiles: currentConfig.voiceProfiles || {},
     audioMix: {
+      version: currentConfig.audioMix?.version || 2,
       musicLevel: getSyncedSliderNumber("musicLevel"),
       voiceLevel: getSyncedSliderNumber("voiceLevel"),
       duckingRatio: getSyncedSliderNumber("duckingRatio"),
@@ -763,6 +789,7 @@ async function refreshPrompts() {
 }
 
 function collectConfig() {
+  persistVisibleVoiceFields();
   return {
     stationName: stationNameInput.value,
     topics: currentConfig.topics.map((topic) => ({
@@ -786,14 +813,8 @@ function collectConfig() {
         },
       },
     },
-    voice: {
-      model: voiceInputs.model?.value || "eleven_multilingual_v2",
-      stability: getSyncedSliderNumber("stability"),
-      similarityBoost: getSyncedSliderNumber("similarityBoost"),
-      style: getSyncedSliderNumber("style"),
-      speed: getSyncedSliderNumber("speed"),
-      speakerBoost: voiceInputs.speakerBoost.checked,
-    },
+    voice: collectVisibleVoiceFields(),
+    voiceProfiles: currentConfig.voiceProfiles || {},
     factPolicy: currentConfig.factPolicy,
     topicCycle: {
       minIntervalMinutes: Number(topicCycleMinInput.value) || 5,
@@ -801,6 +822,7 @@ function collectConfig() {
       order: getTopicCycleOrder(),
     },
     audioMix: {
+      version: currentConfig.audioMix?.version || 2,
       musicLevel: getSyncedSliderNumber("musicLevel"),
       voiceLevel: getSyncedSliderNumber("voiceLevel"),
       duckingRatio: getSyncedSliderNumber("duckingRatio"),

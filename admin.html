@@ -254,7 +254,7 @@
           </div>
           <div class="inline-actions">
             <button id="voiceMusicLockButton" type="button">🔒 Заблокировано</button>
-            <button id="saveButton" class="primary-action" type="button">Применить сейчас</button>
+            <button id="saveButton" class="primary-action" type="button">Применить</button>
           </div>
         </div>
 
@@ -281,8 +281,8 @@
 
           <div class="voice-controls block-panel">
             <h2>Музыка</h2>
-            <label><span class="setting-title">Громкость музыки в обычном режиме <span class="help-tip" title="Общий уровень музыки в миксе с ведущим. Например: 0.72 — спокойно, 1.10 — заметно громче.">?</span></span><span class="range-value-row"><input id="musicLevel" type="range" min="0" max="2" step="0.01"><input id="musicLevelValue" class="range-number" type="number" min="0" max="2" step="0.01"></span></label>
-            <label><span class="setting-title">Громкость голоса ведущего <span class="help-tip" title="Уровень голоса поверх музыки. Например: 1.00 — стандартно, 1.20 — голос ближе к слушателю.">?</span></span><span class="range-value-row"><input id="voiceLevel" type="range" min="0" max="2" step="0.01"><input id="voiceLevelValue" class="range-number" type="number" min="0" max="2" step="0.01"></span></label>
+            <label><span class="setting-title">Громкость музыки в обычном режиме <span class="help-tip" title="Общий уровень музыки во всем эфире: обычные треки, Play-вставки и подложка под голос. Например: 0.72 — спокойно, 1.10 — заметно громче.">?</span></span><span class="range-value-row"><input id="musicLevel" type="range" min="0" max="2" step="0.01"><input id="musicLevelValue" class="range-number" type="number" min="0" max="2" step="0.01"></span></label>
+            <label><span class="setting-title">Громкость голоса ведущего <span class="help-tip" title="Реальный gain голоса поверх музыки. Например: 2.40 — текущий стандарт станции, 1.80 — тише, 2.80 — ближе к слушателю.">?</span></span><span class="range-value-row"><input id="voiceLevel" type="range" min="0" max="3" step="0.01"><input id="voiceLevelValue" class="range-number" type="number" min="0" max="3" step="0.01"></span></label>
             <label><span class="setting-title">Музыка под голосом ведущего <span class="help-tip" title="Сколько музыки остается во время речи. Например: 0.18 — музыка тихо под голосом, 0.40 — музыка слышнее.">?</span></span><span class="range-value-row"><input id="duckingRatio" type="range" min="0" max="1" step="0.01"><input id="duckingRatioValue" class="range-number" type="number" min="0" max="1" step="0.01"></span></label>
             <label><span class="setting-title">Пауза до начала затухания, секунд <span class="help-tip" title="Сколько музыка играет обычной громкостью перед подготовкой к голосу. Например: 0 — сразу готовим голос, 2 — две секунды вступления.">?</span></span><input id="voicePreludeSeconds" type="number" min="0" max="30" step="0.1"></label>
             <label><span class="setting-title">Затухание перед голосом, секунд <span class="help-tip" title="За сколько секунд музыка плавно уйдет под голос. Например: 1.6 — мягкое затухание, 0.5 — резче.">?</span></span><input id="duckFadeSeconds" type="number" min="0.2" max="10" step="0.1"></label>

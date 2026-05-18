@@ -621,6 +621,7 @@ class BroadcastStream {
   }
 
   async streamMusicSegment(tracks) {
+    const normalMusic = await this.readNormalMusicGain();
     const track = tracks[this.currentTrackIndex];
     const musicPath = resolveInside(this.config.liveMusicDir, track.file);
     const segmentStartOffset = Math.max(0, this.currentTrackOffset);
@@ -640,6 +641,7 @@ class BroadcastStream {
       "-t", segmentDuration.toFixed(3),
       "-i", musicPath,
       "-vn",
+      "-af", `volume=${normalMusic},alimiter=limit=0.98:level=false`,
       "-ar", "44100",
       "-ac", "2",
       "-b:a", this.audioBitrate,
@@ -698,6 +700,7 @@ class BroadcastStream {
   }
 
   async streamSingleMusic(filePath, start, duration, title) {
+    const normalMusic = await this.readNormalMusicGain();
     const args = [
       "-hide_banner",
       "-loglevel", "error",
@@ -706,6 +709,7 @@ class BroadcastStream {
       "-t", Math.max(0.1, duration).toFixed(3),
       "-i", filePath,
       "-vn",
+      "-af", `volume=${normalMusic},alimiter=limit=0.98:level=false`,
       "-ar", "44100",
       "-ac", "2",
       "-b:a", this.audioBitrate,
@@ -718,11 +722,12 @@ class BroadcastStream {
   }
 
   async streamCrossfade(fromPath, fromStart, toPath, toStart, duration, title) {
+    const normalMusic = await this.readNormalMusicGain();
     const seconds = Math.max(0.5, duration);
     const filter = [
       `[0:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${seconds.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=out:st=0:d=${seconds.toFixed(3)}[from]`,
       `[1:a]aformat=sample_rates=44100:channel_layouts=stereo,atrim=duration=${seconds.toFixed(3)},asetpts=PTS-STARTPTS,afade=t=in:st=0:d=${seconds.toFixed(3)}[to]`,
-      `[from][to]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,alimiter=limit=0.98:level=false[out]`,
+      `[from][to]amix=inputs=2:duration=longest:dropout_transition=0:normalize=0,volume=${normalMusic},alimiter=limit=0.98:level=false[out]`,
     ].join(";");
     const args = [
       "-hide_banner",
@@ -768,9 +773,8 @@ class BroadcastStream {
     const musicBedSegments = await this.buildMusicBedSegments(tracks, totalDuration);
     this.setCurrentMusicBed(musicBedSegments);
     const normalMusic = clampGain(admin.audioMix?.musicLevel ?? 0.72);
-    const voiceLevel = clampGain(admin.audioMix?.voiceLevel ?? 1);
-    const voiceGain = clampGain(voiceLevel * 2.4);
-    const duckMusic = clamp(normalMusic * (admin.audioMix?.duckingRatio ?? 0.18));
+    const voiceGain = clampGain(admin.audioMix?.voiceLevel ?? 2.4);
+    const duckMusic = clampGain(normalMusic * (admin.audioMix?.duckingRatio ?? 0.18));
     const volumeExpr = [
       `if(lt(t,${duckStart.toFixed(3)}),${normalMusic},`,
       fadeBeforeVoiceSeconds > 0
@@ -1247,6 +1251,11 @@ class BroadcastStream {
     return this.currentPlayItem?.file === file
       || activeTail.some((item) => item.file === file)
       || this.musicQueue.some((item) => item.file === file);
+  }
+
+  async readNormalMusicGain() {
+    const admin = await readAdminConfig(this.config);
+    return clampGain(admin.audioMix?.musicLevel ?? 0.72);
   }
 }
 

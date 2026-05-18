@@ -386,9 +386,18 @@ function createServer(config) {
           stationName: admin.stationName,
           activeHostId: admin.prompts?.activeHostId || null,
           voiceModel: admin.voice?.model || null,
+          voiceStability: admin.voice?.stability ?? null,
+          voiceSimilarityBoost: admin.voice?.similarityBoost ?? null,
+          voiceStyle: admin.voice?.style ?? null,
+          voiceSpeed: admin.voice?.speed ?? null,
+          speakerBoost: admin.voice?.speakerBoost ?? null,
           musicLevel: admin.audioMix?.musicLevel ?? null,
           voiceLevel: admin.audioMix?.voiceLevel ?? null,
           duckingRatio: admin.audioMix?.duckingRatio ?? null,
+          preludeSeconds: admin.audioMix?.preludeSeconds ?? null,
+          duckFadeSeconds: admin.audioMix?.duckFadeSeconds ?? null,
+          restoreFadeSeconds: admin.audioMix?.restoreFadeSeconds ?? null,
+          postludeSeconds: admin.audioMix?.postludeSeconds ?? null,
         });
         await emitAdmin(config, "config", admin);
         await sendJson(response, 200, admin);

@@ -78,9 +78,20 @@ const defaultAdminConfig = {
     speed: 1,
     speakerBoost: true,
   },
+  voiceProfiles: {
+    [DEFAULT_HOST_ID]: {
+      model: "eleven_multilingual_v2",
+      stability: 0.5,
+      similarityBoost: 0.75,
+      style: 0,
+      speed: 1,
+      speakerBoost: true,
+    },
+  },
   audioMix: {
+    version: 2,
     musicLevel: 0.72,
-    voiceLevel: 1,
+    voiceLevel: 2.4,
     duckingRatio: 0.18,
     preludeSeconds: 0,
     duckFadeSeconds: 1.6,
@@ -121,21 +132,23 @@ async function ensureAdminConfig(config) {
 function mergeAdminConfig(input = {}) {
   const minTopicInterval = clampNumber(input.topicCycle?.minIntervalMinutes, defaultAdminConfig.topicCycle.minIntervalMinutes, 1, 240);
   const maxTopicInterval = clampNumber(input.topicCycle?.maxIntervalMinutes, defaultAdminConfig.topicCycle.maxIntervalMinutes, 1, 240);
+  const prompts = normalizePromptConfig(input.prompts);
+  const voiceProfiles = normalizeVoiceProfiles(input.voiceProfiles, input.voice, prompts.hosts);
+  const voice = getVoiceProfile(voiceProfiles, prompts.activeHostId);
+  const audioMixVersion = Math.max(1, Math.floor(Number(input.audioMix?.version) || 1));
+  const legacyVoiceLevel = clampNumber(input.audioMix?.voiceLevel, 1, 0, 2);
   return {
     stationName: String(input.stationName || defaultAdminConfig.stationName).slice(0, 80),
     topics: normalizeTopicTree(input.topics),
-    prompts: normalizePromptConfig(input.prompts),
-    voice: {
-      model: normalizeVoiceModel(input.voice?.model, defaultAdminConfig.voice.model),
-      stability: clampNumber(input.voice?.stability, defaultAdminConfig.voice.stability, 0, 1),
-      similarityBoost: clampNumber(input.voice?.similarityBoost, defaultAdminConfig.voice.similarityBoost, 0, 1),
-      style: clampNumber(input.voice?.style, defaultAdminConfig.voice.style, 0, 1),
-      speed: clampNumber(input.voice?.speed, defaultAdminConfig.voice.speed, 0.7, 1.2),
-      speakerBoost: Boolean(input.voice?.speakerBoost ?? defaultAdminConfig.voice.speakerBoost),
-    },
+    prompts,
+    voice,
+    voiceProfiles,
     audioMix: {
+      version: defaultAdminConfig.audioMix.version,
       musicLevel: clampNumber(input.audioMix?.musicLevel, defaultAdminConfig.audioMix.musicLevel, 0, 2),
-      voiceLevel: clampNumber(input.audioMix?.voiceLevel, defaultAdminConfig.audioMix.voiceLevel, 0, 2),
+      voiceLevel: audioMixVersion >= 2
+        ? clampNumber(input.audioMix?.voiceLevel, defaultAdminConfig.audioMix.voiceLevel, 0, 3)
+        : clampNumber(legacyVoiceLevel * 2.4, defaultAdminConfig.audioMix.voiceLevel, 0, 3),
       duckingRatio: clampNumber(input.audioMix?.duckingRatio, defaultAdminConfig.audioMix.duckingRatio, 0, 1),
       preludeSeconds: clampNumber(input.audioMix?.preludeSeconds, defaultAdminConfig.audioMix.preludeSeconds, 0, 30),
       duckFadeSeconds: clampNumber(input.audioMix?.duckFadeSeconds, defaultAdminConfig.audioMix.duckFadeSeconds, 0.2, 10),
@@ -291,6 +304,38 @@ function normalizeVoiceModel(value, fallback) {
     "eleven_multilingual_v2",
     "eleven_flash_v2_5",
   ].includes(model) ? model : fallback;
+}
+
+function normalizeVoiceProfiles(value = {}, legacyVoice = {}, hosts = {}) {
+  const source = value && typeof value === "object" ? value : {};
+  const hostIds = new Set([DEFAULT_HOST_ID, ...Object.keys(hosts), ...Object.keys(source)]);
+  const legacyProfile = normalizeVoiceProfile(legacyVoice, defaultAdminConfig.voice);
+  const profiles = {};
+
+  for (const rawId of hostIds) {
+    const hostId = normalizeHostId(rawId) || DEFAULT_HOST_ID;
+    const fallback = hostId === DEFAULT_HOST_ID
+      ? legacyProfile
+      : profiles[DEFAULT_HOST_ID] || legacyProfile;
+    profiles[hostId] = normalizeVoiceProfile(source[rawId], fallback);
+  }
+
+  return profiles;
+}
+
+function normalizeVoiceProfile(value = {}, fallback = defaultAdminConfig.voice) {
+  return {
+    model: normalizeVoiceModel(value?.model, fallback.model),
+    stability: clampNumber(value?.stability, fallback.stability, 0, 1),
+    similarityBoost: clampNumber(value?.similarityBoost, fallback.similarityBoost, 0, 1),
+    style: clampNumber(value?.style, fallback.style, 0, 1),
+    speed: clampNumber(value?.speed, fallback.speed, 0.7, 1.2),
+    speakerBoost: Boolean(value?.speakerBoost ?? fallback.speakerBoost),
+  };
+}
+
+function getVoiceProfile(profiles, hostId) {
+  return profiles[hostId] || profiles[DEFAULT_HOST_ID] || defaultAdminConfig.voice;
 }
 
 function clampNumber(value, fallback, min, max) {
